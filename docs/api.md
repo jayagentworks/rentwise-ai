@@ -25,6 +25,7 @@ Token 只返回一次，浏览器保存在 localStorage；数据库只保存 SHA
 |---|---|---|
 | GET | `/api/health` | 服务和 Provider 状态 |
 | GET/PUT | `/api/profile` | 恢复或保存租房偏好 |
+| GET/POST | `/api/profile/export`、`/api/profile/import` | 匿名档案备份和迁移 |
 | POST | `/api/search` | 运行 LangGraph 决策流程 |
 | GET/POST | `/api/favorites` | 查询或收藏房源快照 |
 | DELETE | `/api/favorites/{listing_id}` | 删除收藏 |
@@ -32,6 +33,10 @@ Token 只返回一次，浏览器保存在 localStorage；数据库只保存 SHA
 | POST | `/api/feedback` | 保存推荐反馈 |
 | POST | `/api/contracts/review` | 上传最多12张合同照片或 PDF/TXT/Markdown 并生成风险报告 |
 | GET | `/api/contracts/reviews` | 最近 20 份合同报告 |
+| POST | `/api/search-history/{id}/replay` | 按原条件重新计算旧历史 |
+| POST | `/api/agent-runs/{id}/resume` | 从 PostgreSQL checkpoint 恢复失败运行 |
+| POST | `/api/listings/images/analyze` | 分析用户上传的房源图片可见现象 |
+| POST/DELETE | `/api/artifacts` | 明确授权后的可选 MinIO 保存与删除 |
 
 `POST /api/search` 返回 `search_id` 和 `agent_run_id`，用于关联历史、反馈和运行轨迹。
 

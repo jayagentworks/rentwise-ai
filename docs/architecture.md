@@ -51,4 +51,4 @@ stateDiagram-v2
 - `agent_runs`：LangGraph 运行状态、轨迹和摘要。
 - `contract_reviews`：合同文件哈希和风险报告，不保存合同正文。
 
-当前开发版本在启动时以 SQLAlchemy metadata 建表。进入生产部署前应切换到 Alembic 版本迁移。
+数据库结构由 Alembic 管理，容器启动前执行 `alembic upgrade head`。LangGraph 每个节点状态由独立 PostgreSQL checkpoint 表持久化；Redis 仍只承载可丢弃缓存与限流状态。

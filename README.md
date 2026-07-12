@@ -80,3 +80,20 @@ cd frontend && npm run build
 - 自定义开放偏好只有与结构化标签精确匹配时才参与加分。
 - 合同核验当前是首版规则集；已支持合同照片 OCR，普通房源图片分析尚未开始。
 - 本系统提供决策辅助，不替代房源线下核验、律师意见或司法认定。
+
+## 质量与生产能力
+
+- PostgreSQL LangGraph 节点检查点和失败恢复。
+- Alembic 数据库版本迁移。
+- Playwright 浏览器端到端测试与 Agent 固定评估集。
+- 匿名档案 JSON 导入导出；反馈会有限度影响后续排序。
+- 房源图片证据受限分析；可选 MinIO 默认关闭且要求明确授权。
+- 生产 Compose 覆盖、安全响应头、健康检查与数据库备份脚本。
+
+## 最终交付文档
+
+- [完整数据流与 Agent 状态图](docs/data-flow.md)
+- [部署与运维](docs/deployment.md)
+- [Agent 评估报告](docs/agent-evaluation.md)
+- [面试讲解稿](docs/interview-guide.md)
+- [简历项目描述](docs/resume-description.md)

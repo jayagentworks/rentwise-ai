@@ -29,10 +29,15 @@ LLM_TEMPERATURE=0
 
 调用使用 JSON 模式、关闭思考输出、温度为 0，并对限流和网络错误重试。密钥只保存在本地 `.env`。
 
-## 后续阶段
+## 已完成的工程化阶段
 
-- 房源图片分析。
-- 扩充合同规则库、扫描PDF转图和权威法律条文版本管理。
-- 真实中国房源 Provider。
-- Playwright 端到端测试和 Agent 评估集。
-- Alembic 数据库迁移与生产部署加固。
+- 房源图片证据受限分析。
+- 扩充合同规则库、扫描 PDF 转图 OCR 和法律来源版本元数据。
+- Playwright 端到端测试和 Agent 固定评估集。
+- PostgreSQL LangGraph checkpoint 与恢复接口。
+- Alembic 数据库迁移、可选 MinIO 和生产部署加固。
+- 匿名档案导入导出和反馈驱动排序。
+
+## 明确延期
+
+真实中国房源 Provider、RentCast 和 Google Maps 按产品决策暂不接入。当前房源仍为模拟上海快照，高德通勤为真实路线数据。
