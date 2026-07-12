@@ -1,0 +1,38 @@
+{
+  "generated_at": "2026-07-12T17:28:11.867175+00:00",
+  "cases": 3,
+  "passed": 3,
+  "pass_rate": 1.0,
+  "results": [
+    {
+      "id": "budget-and-commute",
+      "passed": true,
+      "checks": {
+        "candidate_count": true,
+        "top_hard_constraints_passed": true,
+        "metrics_nonnegative": true,
+        "evidence_boundary": true
+      }
+    },
+    {
+      "id": "family-fairness",
+      "passed": true,
+      "checks": {
+        "candidate_count": true,
+        "top_hard_constraints_passed": true,
+        "metrics_nonnegative": true,
+        "evidence_boundary": true
+      }
+    },
+    {
+      "id": "unverified-preference",
+      "passed": true,
+      "checks": {
+        "candidate_count": true,
+        "top_hard_constraints_passed": true,
+        "metrics_nonnegative": true,
+        "evidence_boundary": true
+      }
+    }
+  ]
+}

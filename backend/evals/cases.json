@@ -1,0 +1,5 @@
+[
+  {"id":"budget-and-commute","preferences":{"monthly_rent_max":6000,"monthly_total_max":6800,"move_in_date":"2026-08-01","destinations":[{"label":"公司","address":"陆家嘴","weight":1,"max_minutes":60}],"soft_preferences":["采光好"]},"expect":{"candidate_count":6,"top_hard_constraints_passed":true}},
+  {"id":"family-fairness","preferences":{"monthly_rent_max":8000,"monthly_total_max":9000,"move_in_date":"2026-08-01","destinations":[{"label":"本人","address":"陆家嘴","weight":0.6,"max_minutes":90},{"label":"配偶","address":"南京西路","weight":0.4,"max_minutes":90}]},"expect":{"candidate_count":6,"top_hard_constraints_passed":true}},
+  {"id":"unverified-preference","preferences":{"monthly_rent_max":7000,"monthly_total_max":8000,"move_in_date":"2026-08-01","destinations":[{"label":"公司","address":"张江","weight":1,"max_minutes":90}],"soft_preferences":["房东好沟通"]},"expect":{"candidate_count":6,"assumption_contains":"未计入评分"}}
+]
