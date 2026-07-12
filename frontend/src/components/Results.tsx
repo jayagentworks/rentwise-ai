@@ -1,18 +1,242 @@
-import { ExternalLink, Heart, MapPin, Sparkles, ThumbsDown, ThumbsUp, TrainFront, WalletCards } from 'lucide-react';
-import type { SearchResponse } from '../types';
+import {
+  ExternalLink,
+  Heart,
+  MapPin,
+  Sparkles,
+  ThumbsDown,
+  ThumbsUp,
+  TrainFront,
+  WalletCards,
+} from "lucide-react";
+import type { SearchResponse } from "../types";
+export type ImageReport = { observations: { category: string; observation: string; confidence: string; needs_offline_check: boolean }[]; warnings: string[]; disclaimer: string };
 
-export function Results({ data, lang, onReset, favoriteIds, onToggleFavorite, onFeedback }: { data: SearchResponse; lang: 'zh' | 'en'; onReset: () => void; favoriteIds: Set<string>; onToggleFavorite: (recommendation: SearchResponse['recommendations'][number]) => void; onFeedback: (listingId: string, feedbackType: 'like' | 'dislike') => void }) {
-  const cn = lang === 'zh';
-  return <main className="results">
-    <div className="results-head"><div><p className="eyebrow"><Sparkles/>{cn ? 'Agent 决策结果' : 'Agent decision'}</p><h1>{cn ? '不是最便宜，而是最适合' : 'Not the cheapest. The best fit.'}</h1><p>{cn ? `已分析 ${data.total_candidates} 套候选房源。结果同时考虑真实成本、硬性条件和通勤。` : `Analysed ${data.total_candidates} listings across true cost, constraints and commute.`}</p></div><button className="secondary" onClick={onReset}>{cn ? '调整需求' : 'Edit brief'}</button></div>
-    <div className="assumption-rail">{data.llm_preferences_parsed && <span className="ai-status">{cn ? 'AI 偏好解析' : 'AI preference parsing'}</span>}{data.llm_explanations_generated && <span className="ai-status">{cn ? 'AI 证据解释' : 'AI evidence explanation'}</span>}{data.assumptions.map(x => <span key={x}>{x}</span>)}</div>
-    <div className="listing-grid">{data.recommendations.map((r, i) => <article key={r.listing.id} className={`listing ${!r.hard_constraints_passed ? 'dimmed' : ''}`}>
-      <div className="image-wrap"><img src={r.listing.image_url} alt=""/><span className="rank">#{i + 1}</span><span className={r.hard_constraints_passed ? 'pass' : 'fail'}>{r.hard_constraints_passed ? (cn ? '硬条件通过' : 'Constraints pass') : (cn ? '存在冲突' : 'Has conflicts')}</span></div>
-      <div className="listing-body"><div className="title-row"><div><p>{r.listing.district} · {r.listing.neighborhood}</p><h2>{r.listing.title}</h2></div><div className="recommendation-score" title={cn ? '内部综合排序分：结合成本、通勤、偏好和硬条件计算，不代表概率。' : 'Internal ranking score based on cost, commute, preferences and constraints; not a probability.'}><span>{cn ? '推荐分' : 'Score'}</span><strong>{r.score}</strong></div></div>
-        <div className="metrics"><div><WalletCards/><span>{cn ? '真实月成本' : 'True monthly'}<b>¥{r.monthly_true_cost.toLocaleString()}</b></span></div><div><TrainFront/><span>{cn ? '加权 / 最差通勤' : 'Weighted / worst'}<b>{r.weighted_commute_minutes} / {r.worst_commute_minutes} min</b></span></div><div><MapPin/><span>{cn ? '面积 / 户型' : 'Area / rooms'}<b>{r.listing.area_sqm}m² · {r.listing.bedrooms}{cn ? '室' : ' bd'}</b></span></div></div>
-        <div className="commute-breakdown"><div className="commute-summary"><span>{cn ? '家庭每周总通勤' : 'Household weekly total'}<b>{Math.round(r.weekly_total_commute_minutes / 6) / 10}h</b></span><span>{cn ? '成员通勤差距' : 'Fairness gap'}<b>{r.commute_fairness_gap_minutes} min</b></span></div>{r.commutes.map(commute => <div className="commute-person" key={commute.destination}><span>{commute.destination}</span><b>{commute.minutes} min · {commute.distance_km} km</b><em className={commute.within_limit ? 'within' : 'over'}>{commute.within_limit ? (cn ? '满足上限' : 'Within limit') : (cn ? '超过上限' : 'Over limit')}</em></div>)}</div>
-        <div className="why"><h3>{cn ? '为什么推荐' : 'Why this one'}</h3><ul>{r.reasons.map(x => <li key={x}>{x}</li>)}</ul></div><div className="tradeoff"><h3>{cn ? '你需要接受' : 'Trade-offs'}</h3><ul>{r.tradeoffs.map(x => <li key={x}>{x}</li>)}</ul></div><div className="tags">{r.listing.tags.map(x => <span key={x}>{x}</span>)}</div><div className="listing-actions"><button type="button" className={favoriteIds.has(r.listing.id) ? 'favorited' : ''} onClick={() => onToggleFavorite(r)}><Heart/>{favoriteIds.has(r.listing.id) ? (cn ? '已收藏' : 'Saved') : (cn ? '收藏' : 'Save')}</button><span>{cn ? '这个推荐有帮助吗？' : 'Helpful?'}</span><button type="button" aria-label={cn ? '有帮助' : 'Helpful'} onClick={() => onFeedback(r.listing.id, 'like')}><ThumbsUp/></button><button type="button" aria-label={cn ? '没帮助' : 'Not helpful'} onClick={() => onFeedback(r.listing.id, 'dislike')}><ThumbsDown/></button></div><a className="contact" href={r.listing.source_url} target="_blank" rel="noreferrer">{cn ? '一键联系原平台' : 'Contact on source'} <ExternalLink/></a>
+export function Results({
+  data,
+  lang,
+  onReset,
+  favoriteIds,
+  onToggleFavorite,
+  onFeedback,
+  imageReports,
+  onAnalyzeImages,
+}: {
+  data: SearchResponse;
+  lang: "zh" | "en";
+  onReset: () => void;
+  favoriteIds: Set<string>;
+  onToggleFavorite: (
+    recommendation: SearchResponse["recommendations"][number],
+  ) => void;
+  onFeedback: (listingId: string, feedbackType: "like" | "dislike") => void;
+  imageReports: Record<string, ImageReport>;
+  onAnalyzeImages: (listingId: string, files: File[]) => void;
+}) {
+  const cn = lang === "zh";
+  return (
+    <main className="results">
+      <div className="results-head">
+        <div>
+          <p className="eyebrow">
+            <Sparkles />
+            {cn ? "Agent 决策结果" : "Agent decision"}
+          </p>
+          <h1>
+            {cn ? "不是最便宜，而是最适合" : "Not the cheapest. The best fit."}
+          </h1>
+          <p>
+            {cn
+              ? `已分析 ${data.total_candidates} 套候选房源。结果同时考虑真实成本、硬性条件和通勤。`
+              : `Analysed ${data.total_candidates} listings across true cost, constraints and commute.`}
+          </p>
+        </div>
+        <button className="secondary" onClick={onReset}>
+          {cn ? "调整需求" : "Edit brief"}
+        </button>
       </div>
-    </article>)}</div>
-  </main>;
+      <div className="assumption-rail">
+        {data.llm_preferences_parsed && (
+          <span className="ai-status">
+            {cn ? "AI 偏好解析" : "AI preference parsing"}
+          </span>
+        )}
+        {data.llm_explanations_generated && (
+          <span className="ai-status">
+            {cn ? "AI 证据解释" : "AI evidence explanation"}
+          </span>
+        )}
+        {data.assumptions.map((x) => (
+          <span key={x}>{x}</span>
+        ))}
+      </div>
+      <div className="listing-grid">
+        {data.recommendations.map((r, i) => (
+          <article
+            key={r.listing.id}
+            className={`listing ${!r.hard_constraints_passed ? "dimmed" : ""}`}
+          >
+            <div className="image-wrap">
+              <img src={r.listing.image_url} alt="" />
+              <span className="rank">#{i + 1}</span>
+              <span className={r.hard_constraints_passed ? "pass" : "fail"}>
+                {r.hard_constraints_passed
+                  ? cn
+                    ? "硬条件通过"
+                    : "Constraints pass"
+                  : cn
+                    ? "存在冲突"
+                    : "Has conflicts"}
+              </span>
+            </div>
+            <div className="listing-body">
+              <div className="title-row">
+                <div>
+                  <p>
+                    {r.listing.district} · {r.listing.neighborhood}
+                  </p>
+                  <h2>{r.listing.title}</h2>
+                </div>
+                <div
+                  className="recommendation-score"
+                  title={
+                    cn
+                      ? "内部综合排序分：结合成本、通勤、偏好和硬条件计算，不代表概率。"
+                      : "Internal ranking score based on cost, commute, preferences and constraints; not a probability."
+                  }
+                >
+                  <span>{cn ? "推荐分" : "Score"}</span>
+                  <strong>{r.score}</strong>
+                </div>
+              </div>
+              <div className="metrics">
+                <div>
+                  <WalletCards />
+                  <span>
+                    {cn ? "真实月成本" : "True monthly"}
+                    <b>¥{r.monthly_true_cost.toLocaleString()}</b>
+                  </span>
+                </div>
+                <div>
+                  <TrainFront />
+                  <span>
+                    {cn ? "加权 / 最差通勤" : "Weighted / worst"}
+                    <b>
+                      {r.weighted_commute_minutes} / {r.worst_commute_minutes}{" "}
+                      min
+                    </b>
+                  </span>
+                </div>
+                <div>
+                  <MapPin />
+                  <span>
+                    {cn ? "面积 / 户型" : "Area / rooms"}
+                    <b>
+                      {r.listing.area_sqm}m² · {r.listing.bedrooms}
+                      {cn ? "室" : " bd"}
+                    </b>
+                  </span>
+                </div>
+              </div>
+              <div className="commute-breakdown">
+                <div className="commute-summary">
+                  <span>
+                    {cn ? "家庭每周总通勤" : "Household weekly total"}
+                    <b>
+                      {Math.round(r.weekly_total_commute_minutes / 6) / 10}h
+                    </b>
+                  </span>
+                  <span>
+                    {cn ? "成员通勤差距" : "Fairness gap"}
+                    <b>{r.commute_fairness_gap_minutes} min</b>
+                  </span>
+                </div>
+                {r.commutes.map((commute) => (
+                  <div className="commute-person" key={commute.destination}>
+                    <span>{commute.destination}</span>
+                    <b>
+                      {commute.minutes} min · {commute.distance_km} km
+                    </b>
+                    <em className={commute.within_limit ? "within" : "over"}>
+                      {commute.within_limit
+                        ? cn
+                          ? "满足上限"
+                          : "Within limit"
+                        : cn
+                          ? "超过上限"
+                          : "Over limit"}
+                    </em>
+                  </div>
+                ))}
+              </div>
+              <label className="image-analysis-button">
+                {cn ? "上传照片进行视觉核验" : "Upload photos for visual review"}
+                <input type="file" multiple accept=".jpg,.jpeg,.png,.webp" onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) onAnalyzeImages(r.listing.id, files); }} />
+              </label>
+              {imageReports[r.listing.id] && <div className="image-analysis-report"><b>{cn ? "图片观察" : "Visual observations"}</b><ul>{imageReports[r.listing.id].observations.map((item, index) => <li key={`${item.category}-${index}`}>{item.category}：{item.observation}（{item.confidence}）</li>)}</ul><small>{imageReports[r.listing.id].disclaimer}</small></div>}
+              <div className="why">
+                <h3>{cn ? "为什么推荐" : "Why this one"}</h3>
+                <ul>
+                  {r.reasons.map((x) => (
+                    <li key={x}>{x}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="tradeoff">
+                <h3>{cn ? "你需要接受" : "Trade-offs"}</h3>
+                <ul>
+                  {r.tradeoffs.map((x) => (
+                    <li key={x}>{x}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="tags">
+                {r.listing.tags.map((x) => (
+                  <span key={x}>{x}</span>
+                ))}
+              </div>
+              <div className="listing-actions">
+                <button
+                  type="button"
+                  className={favoriteIds.has(r.listing.id) ? "favorited" : ""}
+                  onClick={() => onToggleFavorite(r)}
+                >
+                  <Heart />
+                  {favoriteIds.has(r.listing.id)
+                    ? cn
+                      ? "已收藏"
+                      : "Saved"
+                    : cn
+                      ? "收藏"
+                      : "Save"}
+                </button>
+                <span>{cn ? "这个推荐有帮助吗？" : "Helpful?"}</span>
+                <button
+                  type="button"
+                  aria-label={cn ? "有帮助" : "Helpful"}
+                  onClick={() => onFeedback(r.listing.id, "like")}
+                >
+                  <ThumbsUp />
+                </button>
+                <button
+                  type="button"
+                  aria-label={cn ? "没帮助" : "Not helpful"}
+                  onClick={() => onFeedback(r.listing.id, "dislike")}
+                >
+                  <ThumbsDown />
+                </button>
+              </div>
+              <a
+                className="contact"
+                href={r.listing.source_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {cn ? "一键联系原平台" : "Contact on source"} <ExternalLink />
+              </a>
+            </div>
+          </article>
+        ))}
+      </div>
+    </main>
+  );
 }

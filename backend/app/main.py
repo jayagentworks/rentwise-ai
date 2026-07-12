@@ -15,6 +15,7 @@ from app.providers.amap import AMapError, AMapProvider
 from app.providers.mock import MockMapProvider, MockShanghaiListingProvider
 from app.service import RentalDecisionService
 from app.skills.contract import ContractReviewReport, RentalContractReviewSkill
+from app.skills.listing_image import ListingImageAnalysisSkill, ListingImageReport
 
 load_dotenv()
 
@@ -30,6 +31,7 @@ map_provider = AMapProvider(
 llm = OpenAICompatibleLLM(os.getenv("LLM_BASE_URL", ""), os.getenv("LLM_API_KEY", ""), os.getenv("LLM_MODEL", ""), float(os.getenv("LLM_TEMPERATURE", "0")), os.getenv("LLM_VISION_MODEL", ""))
 service = RentalDecisionService(MockShanghaiListingProvider(), map_provider, llm)
 contract_skill = RentalContractReviewSkill(llm)
+listing_image_skill = ListingImageAnalysisSkill(llm)
 
 
 @app.on_event("startup")
@@ -61,6 +63,43 @@ async def get_profile(user_id=Depends(anonymous_user)):
     async with SessionLocal() as db:
         profile = await db.get(RentalProfile, user_id)
         return RentalPreferences.model_validate(profile.preferences) if profile else None
+
+
+@app.get("/api/profile/export")
+async def export_profile(user_id=Depends(anonymous_user)):
+    async with SessionLocal() as db:
+        profile = await db.get(RentalProfile, user_id)
+        favorites_rows = (await db.scalars(select(Favorite).where(Favorite.anonymous_user_id == user_id))).all()
+        return {"format": "rentwise-profile-v1", "exported_at": datetime.now(timezone.utc), "preferences": profile.preferences if profile else None, "favorites": [row.listing_snapshot for row in favorites_rows]}
+
+
+class ProfileBackup(BaseModel):
+    format: str = Field(pattern="^rentwise-profile-v1$")
+    preferences: dict | None = None
+    favorites: list[dict] = Field(default_factory=list, max_length=100)
+
+
+@app.post("/api/profile/import")
+async def import_profile(payload: ProfileBackup, user_id=Depends(anonymous_user)):
+    preferences = RentalPreferences.model_validate(payload.preferences) if payload.preferences else None
+    listings = [Listing.model_validate(item) for item in payload.favorites]
+    async with SessionLocal() as db:
+        if preferences:
+            profile = await db.get(RentalProfile, user_id)
+            if profile: profile.preferences = preferences.model_dump(mode="json")
+            else: db.add(RentalProfile(anonymous_user_id=user_id, preferences=preferences.model_dump(mode="json")))
+        for listing in listings:
+            existing = await db.scalar(select(Favorite).where(Favorite.anonymous_user_id == user_id, Favorite.listing_id == listing.id))
+            if not existing: db.add(Favorite(anonymous_user_id=user_id, listing_id=listing.id, listing_snapshot=listing.model_dump(mode="json")))
+        await db.commit()
+    return {"imported": True, "preferences": bool(preferences), "favorites": len(listings)}
+
+
+@app.post("/api/listings/images/analyze", response_model=ListingImageReport)
+async def analyze_listing_images(files: list[UploadFile] = File(), user_id=Depends(anonymous_user)):
+    payload = [(await file.read(), file.content_type or "application/octet-stream") for file in files]
+    try: return await listing_image_skill.analyze(payload)
+    except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.put("/api/profile", response_model=RentalPreferences)

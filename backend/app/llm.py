@@ -76,3 +76,17 @@ class OpenAICompatibleLLM:
                 if attempt < 2:
                     await asyncio.sleep(attempt + 1)
         raise LLMError(f"Vision OCR failed after retries: {last_error}") from last_error
+
+    async def analyze_images_json(self, images: list[tuple[bytes, str]], prompt: str, max_tokens: int = 1200) -> tuple[dict[str, Any], int]:
+        if not self.enabled or not self.vision_model:
+            raise LLMError("Vision model is not configured")
+        content = [{"type": "image_url", "image_url": {"url": f"data:{mime};base64,{base64.b64encode(data).decode()}"}} for data, mime in images]
+        content.append({"type": "text", "text": prompt})
+        request = {"model": self.vision_model, "messages": [{"role": "user", "content": content}], "temperature": 0, "max_tokens": max_tokens, "response_format": {"type": "json_object"}}
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                response = await client.post(f"{self.base_url}/chat/completions", headers={"Authorization": f"Bearer {self.api_key}"}, json=request)
+                response.raise_for_status(); body = response.json()
+            return json.loads(body["choices"][0]["message"]["content"]), int(body.get("usage", {}).get("total_tokens", 0))
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            raise LLMError("房源图片分析失败") from exc
