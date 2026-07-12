@@ -74,6 +74,9 @@ class ListingRecommendation(BaseModel):
     monthly_true_cost: int
     first_month_cash: int
     weighted_commute_minutes: float
+    worst_commute_minutes: int
+    weekly_total_commute_minutes: int
+    commute_fairness_gap_minutes: int
     commutes: list[CommuteResult]
     hard_constraints_passed: bool
     score: float
@@ -86,4 +89,3 @@ class SearchResponse(BaseModel):
     total_candidates: int
     recommendations: list[ListingRecommendation]
     assumptions: list[str]
-

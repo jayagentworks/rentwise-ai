@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowRight, BriefcaseBusiness, CircleAlert, House, SlidersHorizontal } from 'lucide-react';
+import { ArrowRight, BriefcaseBusiness, CircleAlert, House, Plus, SlidersHorizontal, Trash2 } from 'lucide-react';
 import type { Preferences } from '../types';
 
 const districts = ['浦东新区', '静安区', '徐汇区', '杨浦区', '闵行区', '宝山区'];
@@ -20,11 +20,15 @@ export function SearchWizard({ onSubmit, loading, lang }: {
     soft_preferences: ['近地铁', '采光好'],
   });
   const patch = (value: Partial<Preferences>) => setForm({ ...form, ...value });
+  const updateDestination = (index: number, value: Partial<Preferences['destinations'][number]>) => patch({ destinations: form.destinations.map((destination, current) => current === index ? { ...destination, ...value } : destination) });
+  const addDestination = () => form.destinations.length < 4 && patch({ destinations: [...form.destinations, { label: `家庭成员${form.destinations.length + 1}`, address: '', weight: 0.5, max_minutes: 45 }] });
+  const removeDestination = (index: number) => form.destinations.length > 1 && patch({ destinations: form.destinations.filter((_, current) => current !== index) });
   const cn = lang === 'zh';
   const titles = cn
     ? ['先画出你的租房边界', '把每天的路算进去', '告诉我们什么叫“住得好”']
     : ['Set your rental boundaries', 'Count every commute', 'Define what feels like home'];
   const missingNumber = [form.monthly_rent_max, form.monthly_total_max, form.bedrooms_min, form.area_min].some(Number.isNaN);
+  const invalidDestinations = form.destinations.some(destination => !destination.label.trim() || !destination.address.trim() || destination.weight <= 0 || destination.max_minutes < 5);
 
   const numericValue = (value: number) => Number.isNaN(value) ? '' : value;
   const numericChange = (value: string) => value === '' ? Number.NaN : Number(value);
@@ -65,11 +69,10 @@ export function SearchWizard({ onSubmit, loading, lang }: {
         </div></fieldset>
       </div>}
 
-      {step === 1 && <div className="field-grid">
-        <label className="wide">{cn ? '通勤目的地' : 'Destination'}<input value={form.destinations[0].address} onChange={e => patch({ destinations: [{ ...form.destinations[0], address: e.target.value }] })} /></label>
-        <label>{cn ? '单程上限（分钟）' : 'Max minutes'}<input type="number" value={form.destinations[0].max_minutes} onChange={e => patch({ destinations: [{ ...form.destinations[0], max_minutes: Number(e.target.value) }] })} /></label>
-        <label>{cn ? '交通方式' : 'Mode'}<select value={form.commute_mode} onChange={e => patch({ commute_mode: e.target.value as Preferences['commute_mode'] })}><option value="transit">{cn ? '公共交通' : 'Transit'}</option><option value="driving">{cn ? '驾车' : 'Driving'}</option><option value="bicycling">{cn ? '骑行' : 'Cycling'}</option></select></label>
-        <div className="route-preview wide"><div className="route-dot start" /><div className="route-line" /><div className="route-dot end" /><p>{cn ? '系统将比较每套房到多个家庭目的地的加权通勤；当前首版先填写一个地点，结果页可继续追加。' : 'We compare weighted commutes across household destinations. Start with one; add more after search.'}</p></div>
+      {step === 1 && <div className="commute-editor">
+        <div className="commute-toolbar"><label>{cn ? '交通方式' : 'Mode'}<select value={form.commute_mode} onChange={e => patch({ commute_mode: e.target.value as Preferences['commute_mode'] })}><option value="transit">{cn ? '公共交通' : 'Transit'}</option><option value="driving">{cn ? '驾车' : 'Driving'}</option><option value="walking">{cn ? '步行' : 'Walking'}</option><option value="bicycling">{cn ? '骑行' : 'Cycling'}</option></select></label><button type="button" className="secondary" disabled={form.destinations.length >= 4} onClick={addDestination}><Plus/>{cn ? '添加目的地' : 'Add destination'}</button></div>
+        <div className="destination-list">{form.destinations.map((destination, index) => <fieldset className="destination-card" key={index}><legend>{cn ? `目的地 ${index + 1}` : `Destination ${index + 1}`}</legend><div className="field-grid"><label>{cn ? '家庭成员 / 标签' : 'Person / label'}<input value={destination.label} onChange={e => updateDestination(index, { label: e.target.value })}/></label><label>{cn ? '地点地址' : 'Address'}<input value={destination.address} onChange={e => updateDestination(index, { address: e.target.value })}/></label><label>{cn ? '重要权重' : 'Weight'}<input type="number" min="0.05" max="1" step="0.05" value={destination.weight} onChange={e => updateDestination(index, { weight: Number(e.target.value) })}/></label><label>{cn ? '单程上限（分钟）' : 'Max one-way minutes'}<input type="number" min="5" max="180" value={destination.max_minutes} onChange={e => updateDestination(index, { max_minutes: Number(e.target.value) })}/></label></div>{form.destinations.length > 1 && <button type="button" className="remove-destination" onClick={() => removeDestination(index)}><Trash2/>{cn ? '移除' : 'Remove'}</button>}</fieldset>)}</div>
+        <p className="commute-note">{cn ? '权重用于计算家庭加权通勤；系统还会单独检查每位成员的上限、最差通勤、每周总通勤和公平性。' : 'Weights drive the household average; we also check each limit, worst commute, weekly total and fairness.'}</p>
       </div>}
 
       {step === 2 && <div>
@@ -83,7 +86,7 @@ export function SearchWizard({ onSubmit, loading, lang }: {
 
       <div className="form-actions">
         {step > 0 && <button className="secondary" onClick={() => setStep(step - 1)}>{cn ? '上一步' : 'Back'}</button>}
-        <button className="primary" disabled={loading || missingNumber} onClick={() => step < 2 ? setStep(step + 1) : onSubmit(form)}>
+        <button className="primary" disabled={loading || missingNumber || invalidDestinations} onClick={() => step < 2 ? setStep(step + 1) : onSubmit(form)}>
           {loading ? (cn ? '正在分析…' : 'Analysing…') : step < 2 ? (cn ? '继续' : 'Continue') : (cn ? '生成租房方案' : 'Build my shortlist')} <ArrowRight />
         </button>
       </div>

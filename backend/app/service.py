@@ -40,14 +40,20 @@ class RentalDecisionService:
                 if not commute.within_limit: failures.append(f"到{commute.destination}通勤超时")
             weights = [d.weight for d in prefs.destinations]
             weighted = sum(c.minutes * w for c, w in zip(commutes, weights)) / sum(weights)
+            worst_commute = max(c.minutes for c in commutes)
+            fairness_gap = max(c.minutes for c in commutes) - min(c.minutes for c in commutes)
+            weekly_total = sum(c.minutes * 2 * 5 for c in commutes)
             preference_hits = [tag for tag in listing.tags if tag in prefs.soft_preferences]
             cost_score = max(0, 35 - max(0, monthly - prefs.monthly_total_max * .75) / 120)
             commute_score = max(0, 35 - weighted * .5)
-            score = round(cost_score + commute_score + len(preference_hits) * 5 + (20 if not failures else max(0, 8 - len(failures) * 2)), 1)
+            fairness_penalty = fairness_gap * 0.15 if len(commutes) > 1 else 0
+            score = round(max(0, cost_score + commute_score + len(preference_hits) * 5 + (20 if not failures else max(0, 8 - len(failures) * 2)) - fairness_penalty), 1)
             reasons = [f"真实月均成本约 ¥{monthly:,}", f"加权单程通勤约 {weighted:.0f} 分钟"]
+            if len(commutes) > 1:
+                reasons.append(f"最差单程 {worst_commute} 分钟，家庭通勤差距 {fairness_gap} 分钟")
             if preference_hits: reasons.append("符合偏好：" + "、".join(preference_hits))
             tradeoffs = failures or (["首月现金支出较高"] if first_month > monthly * 2.2 else ["暂无明显硬性冲突，仍需线下核验"])
-            output.append(ListingRecommendation(listing=listing, monthly_true_cost=monthly, first_month_cash=first_month, weighted_commute_minutes=round(weighted, 1), commutes=commutes, hard_constraints_passed=not failures, score=score, reasons=reasons, tradeoffs=tradeoffs))
+            output.append(ListingRecommendation(listing=listing, monthly_true_cost=monthly, first_month_cash=first_month, weighted_commute_minutes=round(weighted, 1), worst_commute_minutes=worst_commute, weekly_total_commute_minutes=weekly_total, commute_fairness_gap_minutes=fairness_gap, commutes=commutes, hard_constraints_passed=not failures, score=score, reasons=reasons, tradeoffs=tradeoffs))
         output.sort(key=lambda item: (item.hard_constraints_passed, item.score), reverse=True)
         commute_assumption = "通勤时间来自高德地图实时路线规划" if self.maps.name == "amap" else "通勤时间为开发测试用模拟数据"
         return SearchResponse(provider=f"{self.listings.name} + {self.maps.name}", total_candidates=len(candidates), recommendations=output, assumptions=["当前房源为模拟上海房源", commute_assumption, "水电燃气统一按每月 ¥300 估算", "Agent判断不替代线下房源核验"])
