@@ -96,4 +96,6 @@ cd frontend && npm run build
 - [部署与运维](docs/deployment.md)
 - [Agent 评估报告](docs/agent-evaluation.md)
 - [面试讲解稿](docs/interview-guide.md)
+- [40 道项目面试题与参考回答](docs/interview-questions.md)
+- [中文系统架构详解](docs/chinese-architecture.md)
 - [简历项目描述](docs/resume-description.md)
