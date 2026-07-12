@@ -92,7 +92,7 @@ class RentalContractReviewSkill:
     def _excerpt(text: str, match: re.Match, radius: int = 70) -> str:
         return text[max(0, match.start() - radius): min(len(text), match.end() + radius)].replace("\n", " ")
 
-    def apply_rules(self, text: str) -> list[ContractFinding]:
+    def apply_rules(self, text: str, city: str = "上海") -> list[ContractFinding]:
         findings: list[ContractFinding] = []
         rules = [
             ("non_residential_space", r"(厨房|卫生间|阳台|储藏室|贮藏室).{0,12}(出租|居住|住人)", "明确违反强制性规则", "非居住空间被约定单独出租用于居住，触发上海住房出租条件风险。", "核实实际出租空间，删除将非居住空间作为独立居住单元的约定。", [SHANGHAI条例, 国家条例]),
@@ -106,8 +106,11 @@ class RentalContractReviewSkill:
             ("forced_sublease_liability", r"转租.{0,10}(一切|全部).{0,8}(责任|费用).{0,8}(承租人|乙方)", "对承租人明显不利", "转租责任约定过于笼统，可能把非承租人原因造成的责任一并转嫁。", "明确是否允许转租、同意程序及责任边界。", [民法典维修]),
         ]
         for rule_id, pattern, level, explanation, suggestion, sources in rules:
+            applicable_sources = [source for source in sources if source.jurisdiction == "全国" or city in source.jurisdiction]
+            if not applicable_sources:
+                continue
             for match in list(re.finditer(pattern, text, re.S))[:3]:
-                findings.append(ContractFinding(rule_id=rule_id, risk_level=level, clause_excerpt=self._excerpt(text, match), explanation=explanation, suggestion=suggestion, sources=sources))
+                findings.append(ContractFinding(rule_id=rule_id, risk_level=level, clause_excerpt=self._excerpt(text, match), explanation=explanation, suggestion=suggestion, sources=applicable_sources))
 
         required = {
             "主体身份与联系方式": ["出租人", "承租人", "甲方", "乙方", "联系方式"],
@@ -120,7 +123,8 @@ class RentalContractReviewSkill:
         }
         missing = [name for name, keywords in required.items() if not any(keyword in text for keyword in keywords)]
         if missing:
-            findings.append(ContractFinding(rule_id="missing_essential_terms", risk_level="信息缺失", clause_excerpt="未检索到以下关键约定：" + "、".join(missing), explanation="合同可能缺少上海市住房租赁条例列举的一般合同事项。仅凭关键词未检出不能证明合同必然缺失，仍需人工核对版式和附件。", suggestion="在签约前补充并明确缺失事项，尤其是费用、维修、违约和争议解决。", sources=[SHANGHAI条例]))
+            source = SHANGHAI条例 if city in {"上海", "上海市"} else 国家条例
+            findings.append(ContractFinding(rule_id="missing_essential_terms", risk_level="信息缺失", clause_excerpt="未检索到以下关键约定：" + "、".join(missing), explanation="合同可能缺少住房租赁合同的一般关键事项。仅凭关键词未检出不能证明合同必然缺失，仍需人工核对版式和附件。", suggestion="在签约前补充并明确缺失事项，尤其是费用、维修、违约和争议解决。", sources=[source]))
         return findings
 
     async def _enhance(self, findings: list[ContractFinding]) -> tuple[bool, int]:
@@ -185,7 +189,7 @@ class RentalContractReviewSkill:
         text = "\n\n".join(text_parts).strip()
         if len(text) < 30:
             raise ValueError("未能提取到足够的合同文本")
-        findings = self.apply_rules(text)
+        findings = self.apply_rules(text, city)
         enhanced, tokens = await self._enhance(findings)
         severity = {"明确违反强制性规则": 4, "疑似无效或可能不成为合同内容": 3, "对承租人明显不利": 2, "信息缺失": 1}
         overall = max(findings, key=lambda item: severity[item.risk_level]).risk_level if findings else "未发现预设规则风险"
@@ -193,4 +197,6 @@ class RentalContractReviewSkill:
         for filename, content, _ in files:
             digest.update(filename.encode())
             digest.update(content)
+        if city not in {"上海", "上海市"}:
+            warnings.append(f"当前已应用全国规则，但尚未加载{city}地方住房租赁规则，请结合当地现行规定人工复核。")
         return ContractReviewReport(document_hash=digest.hexdigest(), filename="、".join(filename for filename, _, _ in files), city=city, overall_risk=overall, findings=findings, llm_enhanced=enhanced, llm_tokens=tokens + ocr_tokens, ocr_used=bool(images), extraction_warnings=warnings)

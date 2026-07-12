@@ -44,3 +44,13 @@ async def test_contract_rules_include_versioned_sources_and_penalty():
     finding = next(item for item in report.findings if item.rule_id == "excessive_penalty")
     assert finding.sources[0].effective_from
     assert finding.sources[0].checked_at == "2026-07-13"
+
+
+@pytest.mark.asyncio
+async def test_non_shanghai_review_does_not_apply_shanghai_only_rule():
+    text = "住房租赁合同。甲方出租人，乙方承租人。房屋地址北京市某路。租期一年，租金5000元，押金5000元。阳台单独出租住人。"
+    report = await RentalContractReviewSkill().review("contract.txt", text.encode(), city="北京")
+    assert "non_residential_space" in {item.rule_id for item in report.findings}
+    finding = next(item for item in report.findings if item.rule_id == "non_residential_space")
+    assert all(source.jurisdiction == "全国" for source in finding.sources)
+    assert any("北京地方" in warning for warning in report.extraction_warnings)
