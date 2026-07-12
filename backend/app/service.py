@@ -29,10 +29,10 @@ def hard_constraints(listing: Listing, prefs: RentalPreferences, monthly: int) -
 
 
 class DecisionState(TypedDict, total=False):
-    preferences: RentalPreferences
-    candidates: list[Listing]
-    recommendations: list[ListingRecommendation]
-    response: SearchResponse
+    preferences: dict
+    candidates: list[dict]
+    recommendations: list[dict]
+    response: dict
     trace: list[str]
     preference_aliases: dict[str, str]
     unverified_preferences: list[str]
@@ -70,12 +70,13 @@ class RentalDecisionService:
         self.graph = self._compile_graph(checkpointer)
 
     async def _search_candidates(self, state: DecisionState) -> DecisionState:
-        candidates = await self.listings.search(state["preferences"])
-        return {"candidates": candidates, "trace": [*state.get("trace", []), "search_candidates"]}
+        candidates = await self.listings.search(RentalPreferences.model_validate(state["preferences"]))
+        return {"candidates": [item.model_dump(mode="json") for item in candidates], "trace": [*state.get("trace", []), "search_candidates"]}
 
     async def _interpret_preferences(self, state: DecisionState) -> DecisionState:
-        preferences = state["preferences"].soft_preferences
-        available_tags = sorted({tag for listing in state["candidates"] for tag in listing.tags})
+        preferences = RentalPreferences.model_validate(state["preferences"]).soft_preferences
+        candidates = [Listing.model_validate(item) for item in state["candidates"]]
+        available_tags = sorted({tag for listing in candidates for tag in listing.tags})
         aliases = {preference: preference for preference in preferences if preference in available_tags}
         unverified = [preference for preference in preferences if preference not in aliases]
         tokens = state.get("llm_tokens", 0)
@@ -102,9 +103,10 @@ class RentalDecisionService:
         return {"preference_aliases": aliases, "unverified_preferences": unverified, "llm_tokens": tokens, "llm_enhanced": enhanced, "llm_preferences_parsed": preferences_parsed, "trace": [*state.get("trace", []), "interpret_preferences"]}
 
     async def _evaluate_and_rank(self, state: DecisionState) -> DecisionState:
-        prefs = state["preferences"]
+        prefs = RentalPreferences.model_validate(state["preferences"])
         output = []
-        for listing in state["candidates"]:
+        for raw_listing in state["candidates"]:
+            listing = Listing.model_validate(raw_listing)
             commute_analysis = await self.commute_skill.calculate(listing, prefs)
             commutes = commute_analysis.commutes
             monthly, first_month = true_cost(listing, prefs.lease_months)
@@ -129,10 +131,10 @@ class RentalDecisionService:
             tradeoffs = failures or (["首月现金支出较高"] if first_month > monthly * 2.2 else ["暂无明显硬性冲突，仍需线下核验"])
             output.append(ListingRecommendation(listing=listing, monthly_true_cost=monthly, first_month_cash=first_month, weighted_commute_minutes=round(weighted, 1), worst_commute_minutes=worst_commute, weekly_total_commute_minutes=weekly_total, commute_fairness_gap_minutes=fairness_gap, commutes=commutes, hard_constraints_passed=not failures, score=score, reasons=reasons, tradeoffs=tradeoffs))
         output.sort(key=lambda item: (item.hard_constraints_passed, item.score), reverse=True)
-        return {"recommendations": output, "trace": [*state.get("trace", []), "evaluate_and_rank"]}
+        return {"recommendations": [item.model_dump(mode="json") for item in output], "trace": [*state.get("trace", []), "evaluate_and_rank"]}
 
     async def _explain_recommendations(self, state: DecisionState) -> DecisionState:
-        recommendations = state["recommendations"]
+        recommendations = [ListingRecommendation.model_validate(item) for item in state["recommendations"]]
         tokens = state.get("llm_tokens", 0)
         enhanced = state.get("llm_enhanced", False)
         if self.llm and self.llm.enabled and recommendations:
@@ -159,23 +161,23 @@ class RentalDecisionService:
                 explanations_generated = False
         else:
             explanations_generated = False
-        return {"recommendations": recommendations, "llm_tokens": tokens, "llm_enhanced": enhanced, "llm_explanations_generated": explanations_generated, "trace": [*state.get("trace", []), "explain_recommendations"]}
+        return {"recommendations": [item.model_dump(mode="json") for item in recommendations], "llm_tokens": tokens, "llm_enhanced": enhanced, "llm_explanations_generated": explanations_generated, "trace": [*state.get("trace", []), "explain_recommendations"]}
 
     async def _finalize_response(self, state: DecisionState) -> DecisionState:
         commute_assumption = "通勤时间来自高德地图实时路线规划" if self.maps.name == "amap" else "通勤时间为开发测试用模拟数据"
         assumptions = ["当前房源为模拟上海房源", commute_assumption, "水电燃气统一按每月 ¥300 估算", "Agent判断不替代线下房源核验"]
         if state.get("unverified_preferences"): assumptions.append("部分自定义偏好缺少房源证据，未计入评分：" + "、".join(state["unverified_preferences"]))
-        response = SearchResponse(provider=f"{self.listings.name} + {self.maps.name}", llm_enhanced=state.get("llm_enhanced", False), llm_preferences_parsed=state.get("llm_preferences_parsed", False), llm_explanations_generated=state.get("llm_explanations_generated", False), llm_tokens=state.get("llm_tokens", 0), total_candidates=len(state["candidates"]), recommendations=state["recommendations"], assumptions=assumptions)
-        return {"response": response, "trace": [*state.get("trace", []), "finalize_response"]}
+        response = SearchResponse(provider=f"{self.listings.name} + {self.maps.name}", llm_enhanced=state.get("llm_enhanced", False), llm_preferences_parsed=state.get("llm_preferences_parsed", False), llm_explanations_generated=state.get("llm_explanations_generated", False), llm_tokens=state.get("llm_tokens", 0), total_candidates=len(state["candidates"]), recommendations=[ListingRecommendation.model_validate(item) for item in state["recommendations"]], assumptions=assumptions)
+        return {"response": response.model_dump(mode="json"), "trace": [*state.get("trace", []), "finalize_response"]}
 
     async def search_with_trace(self, prefs: RentalPreferences, feedback_adjustments: dict[str, float] | None = None, thread_id: str | None = None) -> tuple[SearchResponse, list[str]]:
         config = {"configurable": {"thread_id": thread_id}} if thread_id else None
-        state = await self.graph.ainvoke({"preferences": prefs, "trace": [], "feedback_adjustments": feedback_adjustments or {}}, config)
-        return state["response"], state["trace"]
+        state = await self.graph.ainvoke({"preferences": prefs.model_dump(mode="json"), "trace": [], "feedback_adjustments": feedback_adjustments or {}}, config)
+        return SearchResponse.model_validate(state["response"]), state["trace"]
 
     async def resume_with_trace(self, thread_id: str) -> tuple[SearchResponse, list[str]]:
         state = await self.graph.ainvoke(None, {"configurable": {"thread_id": thread_id}})
-        return state["response"], state["trace"]
+        return SearchResponse.model_validate(state["response"]), state["trace"]
 
     async def search(self, prefs: RentalPreferences) -> SearchResponse:
         response, _ = await self.search_with_trace(prefs)
