@@ -18,7 +18,26 @@ async def test_search_ranks_and_explains_results():
 async def test_langgraph_trace_has_expected_nodes():
     prefs = RentalPreferences(monthly_rent_max=6000, monthly_total_max=6500, move_in_date="2026-08-01", destinations=[Destination(label="公司", address="陆家嘴", weight=1, max_minutes=60)])
     _, trace = await RentalDecisionService(MockShanghaiListingProvider(), MockMapProvider()).search_with_trace(prefs)
-    assert trace == ["search_candidates", "evaluate_and_rank", "finalize_response"]
+    assert trace == ["search_candidates", "interpret_preferences", "evaluate_and_rank", "explain_recommendations", "finalize_response"]
+
+
+class FakeLLM:
+    enabled = True
+
+    async def complete_json(self, system, payload, max_tokens=1200):
+        if "available_tags" in payload:
+            return {"mappings": [{"original": "阳光充足", "matched_tag": "采光好"}]}, 20
+        return {"items": [{"listing_id": item["listing_id"], "reasons": ["基于已验证成本与通勤证据推荐"], "tradeoffs": item["verified_tradeoffs"]} for item in payload["listings"]]}, 30
+
+
+@pytest.mark.asyncio
+async def test_llm_maps_preferences_without_changing_deterministic_metrics():
+    prefs = RentalPreferences(monthly_rent_max=6000, monthly_total_max=6500, move_in_date="2026-08-01", destinations=[Destination(label="公司", address="陆家嘴", weight=1, max_minutes=60)], soft_preferences=["阳光充足"])
+    response = await RentalDecisionService(MockShanghaiListingProvider(), MockMapProvider(), FakeLLM()).search(prefs)
+    assert response.llm_enhanced is True
+    assert response.llm_tokens == 50
+    assert response.recommendations[0].weighted_commute_minutes > 0
+    assert response.recommendations[0].reasons == ["基于已验证成本与通勤证据推荐"]
 
 
 @pytest.mark.asyncio

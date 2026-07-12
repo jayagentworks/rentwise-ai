@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 
 from app.models import Listing, RentalPreferences, SearchResponse
+from app.llm import OpenAICompatibleLLM
 from app.persistence import AgentRun, Favorite, RecommendationFeedback, RentalProfile, SearchHistory, SessionLocal, authenticate_anonymous, create_anonymous_session, create_schema
 from app.providers.amap import AMapError, AMapProvider
 from app.providers.mock import MockMapProvider, MockShanghaiListingProvider
@@ -25,7 +26,8 @@ map_provider = AMapProvider(
         qps=float(os.getenv("AMAP_QPS", "3")),
         redis_url=os.getenv("REDIS_URL"),
 ) if os.getenv("MAP_PROVIDER") == "amap" else mock_map
-service = RentalDecisionService(MockShanghaiListingProvider(), map_provider)
+llm = OpenAICompatibleLLM(os.getenv("LLM_BASE_URL", ""), os.getenv("LLM_API_KEY", ""), os.getenv("LLM_MODEL", ""), float(os.getenv("LLM_TEMPERATURE", "0")))
+service = RentalDecisionService(MockShanghaiListingProvider(), map_provider, llm)
 
 
 @app.on_event("startup")
@@ -150,7 +152,7 @@ async def search(preferences: RentalPreferences, user_id=Depends(anonymous_user)
             stored_run = await db.get(AgentRun, run.id)
             stored_run.status = "completed"
             stored_run.trace = trace
-            stored_run.summary = {"destinations": len(preferences.destinations), "candidates": response.total_candidates, "recommendations": len(response.recommendations)}
+            stored_run.summary = {"destinations": len(preferences.destinations), "candidates": response.total_candidates, "recommendations": len(response.recommendations), "llm_enhanced": response.llm_enhanced, "llm_preferences_parsed": response.llm_preferences_parsed, "llm_explanations_generated": response.llm_explanations_generated, "llm_tokens": response.llm_tokens}
             stored_run.completed_at = datetime.now(timezone.utc)
             await db.commit()
             response.agent_run_id = str(run.id)

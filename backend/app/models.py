@@ -87,6 +87,10 @@ class ListingRecommendation(BaseModel):
 class SearchResponse(BaseModel):
     search_id: str | None = None
     agent_run_id: str | None = None
+    llm_enhanced: bool = False
+    llm_preferences_parsed: bool = False
+    llm_explanations_generated: bool = False
+    llm_tokens: int = 0
     provider: str
     total_candidates: int
     recommendations: list[ListingRecommendation]
