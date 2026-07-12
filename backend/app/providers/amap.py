@@ -1,8 +1,12 @@
 import math
 import asyncio
 import time
+import hashlib
+import json
 
 import httpx
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 from app.models import CommuteMode, CommuteResult, Destination, Listing
 from app.providers.base import MapProvider
@@ -16,7 +20,7 @@ class AMapProvider(MapProvider):
     name = "amap"
     base_url = "https://restapi.amap.com"
 
-    def __init__(self, api_key: str, city: str = "上海", base_url: str | None = None, qps: float = 3):
+    def __init__(self, api_key: str, city: str = "上海", base_url: str | None = None, qps: float = 3, redis_url: str | None = None):
         if not api_key:
             raise ValueError("AMAP_API_KEY is required")
         self.api_key = api_key
@@ -25,10 +29,34 @@ class AMapProvider(MapProvider):
         self._rate_lock = asyncio.Lock()
         self._next_request_at = 0.0
         self._request_interval = 1.05 / max(qps, 0.1)
+        self._qps = max(1, int(qps))
+        self.redis = Redis.from_url(redis_url, decode_responses=True) if redis_url else None
         if base_url:
             self.base_url = base_url.rstrip("/")
 
     async def _wait_for_rate_limit(self) -> None:
+        if self.redis:
+            script = """
+            local key, now, limit = KEYS[1], tonumber(ARGV[1]), tonumber(ARGV[2])
+            redis.call('ZREMRANGEBYSCORE', key, 0, now - 1000)
+            local count = redis.call('ZCARD', key)
+            if count < limit then
+              redis.call('ZADD', key, now, ARGV[3])
+              redis.call('PEXPIRE', key, 1500)
+              return 0
+            end
+            local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+            return math.max(1, 1000 - (now - tonumber(oldest[2])))
+            """
+            while True:
+                now_ms = int(time.time() * 1000)
+                try:
+                    delay_ms = await self.redis.eval(script, 1, "amap:rate:global", now_ms, self._qps, f"{now_ms}:{time.monotonic_ns()}")
+                    if not delay_ms:
+                        return
+                    await asyncio.sleep(delay_ms / 1000)
+                except RedisError:
+                    break
         async with self._rate_lock:
             now = time.monotonic()
             delay = self._next_request_at - now
@@ -37,6 +65,15 @@ class AMapProvider(MapProvider):
             self._next_request_at = time.monotonic() + self._request_interval
 
     async def _get(self, path: str, params: dict[str, str]) -> dict:
+        cache_payload = json.dumps({"path": path, "params": sorted(params.items())}, ensure_ascii=False, separators=(",", ":"))
+        cache_key = f"amap:response:{hashlib.sha256(cache_payload.encode()).hexdigest()}"
+        if self.redis:
+            try:
+                cached = await self.redis.get(cache_key)
+                if cached:
+                    return json.loads(cached)
+            except RedisError:
+                pass
         last_error: Exception | None = None
         for attempt in range(3):
             try:
@@ -54,6 +91,12 @@ class AMapProvider(MapProvider):
             raise AMapError(f"AMap network request failed after retries: {last_error}") from last_error
         if str(data.get("status")) != "1":
             raise AMapError(f"AMap API error: {data.get('info', 'unknown error')} ({data.get('infocode', '-')})")
+        if self.redis:
+            try:
+                ttl = 30 * 24 * 60 * 60 if path == "/v3/geocode/geo" else 15 * 60
+                await self.redis.set(cache_key, json.dumps(data, ensure_ascii=False), ex=ttl)
+            except RedisError:
+                pass
         return data
 
     async def geocode(self, address: str) -> tuple[float, float]:

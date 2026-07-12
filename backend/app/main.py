@@ -21,7 +21,8 @@ mock_map = MockMapProvider()
 map_provider = AMapProvider(
     os.environ["AMAP_API_KEY"],
     base_url=os.getenv("AMAP_BASE_URL"),
-    qps=float(os.getenv("AMAP_QPS", "3")),
+        qps=float(os.getenv("AMAP_QPS", "3")),
+        redis_url=os.getenv("REDIS_URL"),
 ) if os.getenv("MAP_PROVIDER") == "amap" else mock_map
 service = RentalDecisionService(MockShanghaiListingProvider(), map_provider)
 

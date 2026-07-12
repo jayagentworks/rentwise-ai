@@ -5,8 +5,11 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://rentscout:rentscout_dev@postgres:5432/rentscout
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
   frontend:
     build: ./frontend
@@ -26,5 +29,10 @@ services:
       retries: 10
   redis:
     image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 volumes:
   postgres_data:
