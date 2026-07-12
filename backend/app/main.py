@@ -2,7 +2,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -10,10 +10,11 @@ from sqlalchemy import delete, select
 
 from app.models import Listing, RentalPreferences, SearchResponse
 from app.llm import OpenAICompatibleLLM
-from app.persistence import AgentRun, Favorite, RecommendationFeedback, RentalProfile, SearchHistory, SessionLocal, authenticate_anonymous, create_anonymous_session, create_schema
+from app.persistence import AgentRun, ContractReview, Favorite, RecommendationFeedback, RentalProfile, SearchHistory, SessionLocal, authenticate_anonymous, create_anonymous_session, create_schema
 from app.providers.amap import AMapError, AMapProvider
 from app.providers.mock import MockMapProvider, MockShanghaiListingProvider
 from app.service import RentalDecisionService
+from app.skills.contract import ContractReviewReport, RentalContractReviewSkill
 
 load_dotenv()
 
@@ -28,6 +29,7 @@ map_provider = AMapProvider(
 ) if os.getenv("MAP_PROVIDER") == "amap" else mock_map
 llm = OpenAICompatibleLLM(os.getenv("LLM_BASE_URL", ""), os.getenv("LLM_API_KEY", ""), os.getenv("LLM_MODEL", ""), float(os.getenv("LLM_TEMPERATURE", "0")))
 service = RentalDecisionService(MockShanghaiListingProvider(), map_provider, llm)
+contract_skill = RentalContractReviewSkill(llm)
 
 
 @app.on_event("startup")
@@ -122,6 +124,25 @@ async def save_feedback(payload: FeedbackInput, user_id=Depends(anonymous_user))
         db.add(RecommendationFeedback(anonymous_user_id=user_id, search_id=search_id, listing_id=payload.listing_id, feedback_type=payload.feedback_type, reason=payload.reason))
         await db.commit()
         return {"saved": True}
+
+
+@app.post("/api/contracts/review", response_model=ContractReviewReport)
+async def review_contract(file: UploadFile = File(), city: str = Form(default="上海"), user_id=Depends(anonymous_user)):
+    try:
+        report = await contract_skill.review(file.filename or "contract.txt", await file.read(), city)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    async with SessionLocal() as db:
+        db.add(ContractReview(anonymous_user_id=user_id, filename=report.filename, document_hash=report.document_hash, report=report.model_dump(mode="json")))
+        await db.commit()
+    return report
+
+
+@app.get("/api/contracts/reviews")
+async def contract_reviews(user_id=Depends(anonymous_user)):
+    async with SessionLocal() as db:
+        rows = (await db.scalars(select(ContractReview).where(ContractReview.anonymous_user_id == user_id).order_by(ContractReview.created_at.desc()).limit(20))).all()
+        return [{"id": str(row.id), "filename": row.filename, "document_hash": row.document_hash, "report": row.report, "created_at": row.created_at} for row in rows]
 
 
 @app.get("/api/health")

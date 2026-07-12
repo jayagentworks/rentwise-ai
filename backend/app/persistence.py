@@ -76,6 +76,17 @@ class AgentRun(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ContractReview(Base):
+    __tablename__ = "contract_reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    anonymous_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("anonymous_users.id", ondelete="CASCADE"), index=True)
+    filename: Mapped[str] = mapped_column(String(260), nullable=False)
+    document_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    report: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://rentscout:rentscout_dev@postgres:5432/rentscout")
 engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)

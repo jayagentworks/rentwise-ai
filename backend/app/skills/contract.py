@@ -1,0 +1,124 @@
+import hashlib
+import io
+import re
+from typing import Literal
+
+from pydantic import BaseModel
+from pypdf import PdfReader
+
+from app.llm import LLMError, OpenAICompatibleLLM
+
+
+RiskLevel = Literal["明确违反强制性规则", "疑似无效或可能不成为合同内容", "对承租人明显不利", "信息缺失"]
+
+
+class LegalSource(BaseModel):
+    title: str
+    provision: str
+    url: str
+
+
+class ContractFinding(BaseModel):
+    rule_id: str
+    risk_level: RiskLevel
+    clause_excerpt: str
+    explanation: str
+    suggestion: str
+    sources: list[LegalSource]
+
+
+class ContractReviewReport(BaseModel):
+    document_hash: str
+    filename: str
+    city: str
+    overall_risk: str
+    findings: list[ContractFinding]
+    llm_enhanced: bool = False
+    llm_tokens: int = 0
+    disclaimer: str = "本结果是基于现行公开法律规则的辅助核验，不替代律师意见或司法机关对具体案件的认定。"
+
+
+SHANGHAI条例 = LegalSource(title="上海市住房租赁条例", provision="第十五条、第十六条", url="https://fgj.sh.gov.cn/gzdt/20221202/f72b607956b34fc4878d55b5a6a9d064.html")
+民法典维修 = LegalSource(title="中华人民共和国民法典", provision="第七百一十二条至第七百一十四条", url="https://gdca.miit.gov.cn/zwgk/zcwj/flfg/art/2020/art_573d6ef5018b46b6a4e1f31ca085a710.html")
+房屋租赁解释 = LegalSource(title="最高人民法院关于审理城镇房屋租赁合同纠纷案件具体应用法律若干问题的解释", provision="第二条、第三条", url="https://gongbao.court.gov.cn/Details/1ba2a85c913753569685966e8ee1e6.html")
+国家条例 = LegalSource(title="住房租赁条例", provision="现行行政法规", url="https://xzfg.moj.gov.cn/mobile/law/detail?LawID=1774&Query=")
+
+
+class RentalContractReviewSkill:
+    name = "rental_contract_review"
+
+    def __init__(self, llm: OpenAICompatibleLLM | None = None):
+        self.llm = llm
+
+    def extract_text(self, filename: str, content: bytes) -> str:
+        if len(content) > 10 * 1024 * 1024:
+            raise ValueError("合同文件不能超过 10MB")
+        suffix = filename.lower().rsplit(".", 1)[-1]
+        if suffix == "pdf":
+            reader = PdfReader(io.BytesIO(content))
+            if len(reader.pages) > 80:
+                raise ValueError("合同 PDF 不能超过 80 页")
+            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        elif suffix in {"txt", "md"}:
+            text = content.decode("utf-8-sig")
+        else:
+            raise ValueError("当前仅支持 PDF、TXT 和 Markdown 合同")
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        if len(text) < 30:
+            raise ValueError("未能提取到足够的合同文本；扫描 PDF 需要先进行 OCR")
+        return text[:120_000]
+
+    @staticmethod
+    def _excerpt(text: str, match: re.Match, radius: int = 70) -> str:
+        return text[max(0, match.start() - radius): min(len(text), match.end() + radius)].replace("\n", " ")
+
+    def apply_rules(self, text: str) -> list[ContractFinding]:
+        findings: list[ContractFinding] = []
+        rules = [
+            ("non_residential_space", r"(厨房|卫生间|阳台|储藏室|贮藏室).{0,12}(出租|居住|住人)", "明确违反强制性规则", "非居住空间被约定单独出租用于居住，触发上海住房出租条件风险。", "核实实际出租空间，删除将非居住空间作为独立居住单元的约定。", [SHANGHAI条例, 国家条例]),
+            ("illegal_building", r"(未取得|没有).{0,12}(建设工程规划许可证|规划许可)|违法建筑|违章建筑", "疑似无效或可能不成为合同内容", "文本显示房屋可能缺少规划许可；符合司法解释条件时，租赁合同可能被认定无效。", "签约前核验不动产权属、规划许可及主管部门批准文件。", [房屋租赁解释]),
+            ("all_repairs_tenant", r"(任何|全部|所有).{0,8}维修.{0,12}(承租人|乙方).{0,6}(承担|负责)|维修.{0,10}(全部|一律).{0,8}(承租人|乙方)", "对承租人明显不利", "条款可能不区分自然损耗、出租人维修义务与承租人过错，扩大了承租人责任。", "明确房屋主体和自然损耗由出租人维修，承租人仅承担因自身过错造成的损坏。", [民法典维修]),
+            ("unannounced_entry", r"(出租人|甲方).{0,12}(随时|无需通知).{0,8}(进入|检查).{0,8}(房屋|房间)", "对承租人明显不利", "条款允许出租方无通知进入承租空间，可能严重影响承租人的正常占有使用。", "约定除紧急情况外应提前合理通知并取得承租人配合。", [国家条例]),
+            ("deposit_forfeit", r"押金.{0,12}(概不退还|一律不退|不予退还)", "疑似无效或可能不成为合同内容", "押金无条件不退可能构成明显加重承租人责任的格式条款，仍需结合提示说明义务和违约事实判断。", "把押金扣除限定为有证据的欠费、损坏或约定违约，并明确结算与返还期限。", [国家条例]),
+        ]
+        for rule_id, pattern, level, explanation, suggestion, sources in rules:
+            for match in list(re.finditer(pattern, text, re.S))[:3]:
+                findings.append(ContractFinding(rule_id=rule_id, risk_level=level, clause_excerpt=self._excerpt(text, match), explanation=explanation, suggestion=suggestion, sources=sources))
+
+        required = {
+            "主体身份与联系方式": ["出租人", "承租人", "甲方", "乙方", "联系方式"],
+            "房屋及设施基本情况": ["房屋地址", "坐落", "附属设施", "设备清单"],
+            "租赁期限与交付": ["租赁期限", "租期", "交付日期"],
+            "租金与押金": ["租金", "押金"],
+            "水电物业等费用": ["水费", "电费", "物业费", "燃气费"],
+            "维修责任": ["维修", "修缮"],
+            "违约与争议解决": ["违约责任", "争议解决", "人民法院", "仲裁"],
+        }
+        missing = [name for name, keywords in required.items() if not any(keyword in text for keyword in keywords)]
+        if missing:
+            findings.append(ContractFinding(rule_id="missing_essential_terms", risk_level="信息缺失", clause_excerpt="未检索到以下关键约定：" + "、".join(missing), explanation="合同可能缺少上海市住房租赁条例列举的一般合同事项。仅凭关键词未检出不能证明合同必然缺失，仍需人工核对版式和附件。", suggestion="在签约前补充并明确缺失事项，尤其是费用、维修、违约和争议解决。", sources=[SHANGHAI条例]))
+        return findings
+
+    async def _enhance(self, findings: list[ContractFinding]) -> tuple[bool, int]:
+        if not findings or not self.llm or not self.llm.enabled:
+            return False, 0
+        payload = {"findings": [{"rule_id": item.rule_id, "risk_level": item.risk_level, "clause_excerpt": item.clause_excerpt, "rule_explanation": item.explanation, "rule_suggestion": item.suggestion, "sources": [source.model_dump() for source in item.sources]} for item in findings], "output_schema": {"items": [{"rule_id": "string", "explanation": "string", "suggestion": "string"}]}}
+        try:
+            result, tokens = await self.llm.complete_json("你是住房租赁合同风险解释器。只能依据输入的条款、规则等级和法律来源进行通俗解释；不得改变风险等级、添加法律条文或宣布最终违法无效。仅输出 JSON。", payload, max_tokens=1600)
+            by_rule = {item.get("rule_id"): item for item in result.get("items", [])}
+            for finding in findings:
+                enhanced = by_rule.get(finding.rule_id)
+                if enhanced and isinstance(enhanced.get("explanation"), str): finding.explanation = enhanced["explanation"][:800]
+                if enhanced and isinstance(enhanced.get("suggestion"), str): finding.suggestion = enhanced["suggestion"][:500]
+            return True, tokens
+        except LLMError:
+            return False, 0
+
+    async def review(self, filename: str, content: bytes, city: str = "上海") -> ContractReviewReport:
+        text = self.extract_text(filename, content)
+        findings = self.apply_rules(text)
+        enhanced, tokens = await self._enhance(findings)
+        severity = {"明确违反强制性规则": 4, "疑似无效或可能不成为合同内容": 3, "对承租人明显不利": 2, "信息缺失": 1}
+        overall = max(findings, key=lambda item: severity[item.risk_level]).risk_level if findings else "未发现预设规则风险"
+        return ContractReviewReport(document_hash=hashlib.sha256(content).hexdigest(), filename=filename, city=city, overall_risk=overall, findings=findings, llm_enhanced=enhanced, llm_tokens=tokens)

@@ -32,7 +32,7 @@ LLM_TEMPERATURE=0
 ## 后续阶段
 
 - 房源图片分析。
-- 合同上传、OCR、法律规则检索和风险说明。
+- 扩充合同规则库、OCR 和权威法律条文版本管理。
 - 真实中国房源 Provider。
 - Playwright 端到端测试和 Agent 评估集。
 - Alembic 数据库迁移与生产部署加固。

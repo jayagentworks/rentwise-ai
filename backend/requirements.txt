@@ -6,6 +6,8 @@ python-dotenv==1.1.1
 SQLAlchemy==2.0.41
 asyncpg==0.30.0
 redis==6.2.0
+python-multipart==0.0.20
+pypdf==5.7.0
 langgraph==0.6.7
 pytest==8.4.1
 pytest-asyncio==1.1.0

@@ -13,6 +13,8 @@
 - 真实月成本、首月支出、最差通勤、每周总通勤和公平性计算
 - 确定性 LangGraph 决策状态图
 - 硅基流动 Qwen 模型的开放偏好解析与证据约束解释
+- LangGraph 强制调用的通勤规划 Skill
+- PDF/TXT/Markdown 租赁合同规则核验 Skill
 - 匿名身份、偏好自动保存与恢复
 - 收藏房源快照、搜索历史和推荐反馈
 - PostgreSQL 持久化与 Agent 运行轨迹
@@ -69,11 +71,12 @@ cd frontend && npm run build
 - [API 与匿名身份](docs/api.md)
 - [评分规则](docs/scoring.md)
 - [开发阶段与 LLM 接入边界](docs/development-plan.md)
+- [合同核验 Skill](docs/contract-review.md)
 
 ## 当前边界
 
 - 房源仍是模拟快照，原平台链接仅用于演示。
 - LLM 只解释可验证证据；失败时自动保留规则模板结果。
 - 自定义开放偏好只有与结构化标签精确匹配时才参与加分。
-- 合同法律核验和图片分析尚未开始。
+- 合同核验当前是首版规则集，不含扫描件 OCR；图片分析尚未开始。
 - 本系统提供决策辅助，不替代房源线下核验、律师意见或司法认定。
