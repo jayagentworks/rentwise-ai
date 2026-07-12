@@ -30,7 +30,7 @@ Token 只返回一次，浏览器保存在 localStorage；数据库只保存 SHA
 | DELETE | `/api/favorites/{listing_id}` | 删除收藏 |
 | GET | `/api/search-history` | 最近 20 次搜索 |
 | POST | `/api/feedback` | 保存推荐反馈 |
-| POST | `/api/contracts/review` | 上传 PDF/TXT/Markdown 并生成风险报告 |
+| POST | `/api/contracts/review` | 上传最多12张合同照片或 PDF/TXT/Markdown 并生成风险报告 |
 | GET | `/api/contracts/reviews` | 最近 20 份合同报告 |
 
 `POST /api/search` 返回 `search_id` 和 `agent_run_id`，用于关联历史、反馈和运行轨迹。
@@ -40,4 +40,4 @@ Token 只返回一次，浏览器保存在 localStorage；数据库只保存 SHA
 - 不保存姓名、手机号、身份证或平台登录信息。
 - 清除浏览器数据会丢失匿名凭证，无法找回原档案。
 - 收藏保存的是当时快照，房源当前状态必须回原平台确认。
-- 合同正文不落库，只保存 SHA-256 文件哈希与报告；扫描 PDF 当前需要先 OCR。
+- 合同照片和正文不落库，只保存 SHA-256 文件哈希与报告；照片通过视觉模型 OCR。

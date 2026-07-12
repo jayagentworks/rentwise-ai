@@ -17,3 +17,21 @@ async def test_contract_skill_detects_repair_and_missing_terms():
 async def test_contract_skill_rejects_unsupported_file():
     with pytest.raises(ValueError, match="仅支持"):
         await RentalContractReviewSkill().review("contract.docx", b"x" * 100)
+
+
+class FakeVisionLLM:
+    enabled = True
+
+    async def extract_images_text(self, images, max_tokens=5000):
+        return "住房租赁合同。甲方出租人，乙方承租人。房屋地址上海市某路1号。所有维修费用全部由承租人承担。租期一年，租金5000元，押金5000元。", 120
+
+    async def complete_json(self, system, payload, max_tokens=1600):
+        return {"items": []}, 20
+
+
+@pytest.mark.asyncio
+async def test_contract_photo_uses_ocr_then_rules():
+    report = await RentalContractReviewSkill(FakeVisionLLM()).review_files([("page-1.jpg", b"fake-image-content" * 10, "image/jpeg")])
+    assert report.ocr_used is True
+    assert report.llm_tokens == 140
+    assert "all_repairs_tenant" in {finding.rule_id for finding in report.findings}

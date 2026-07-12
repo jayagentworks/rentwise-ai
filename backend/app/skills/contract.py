@@ -3,7 +3,7 @@ import io
 import re
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
 from app.llm import LLMError, OpenAICompatibleLLM
@@ -35,6 +35,8 @@ class ContractReviewReport(BaseModel):
     findings: list[ContractFinding]
     llm_enhanced: bool = False
     llm_tokens: int = 0
+    ocr_used: bool = False
+    extraction_warnings: list[str] = Field(default_factory=list)
     disclaimer: str = "本结果是基于现行公开法律规则的辅助核验，不替代律师意见或司法机关对具体案件的认定。"
 
 
@@ -116,9 +118,50 @@ class RentalContractReviewSkill:
             return False, 0
 
     async def review(self, filename: str, content: bytes, city: str = "上海") -> ContractReviewReport:
-        text = self.extract_text(filename, content)
+        return await self.review_files([(filename, content, "application/octet-stream")], city)
+
+    async def review_files(self, files: list[tuple[str, bytes, str]], city: str = "上海") -> ContractReviewReport:
+        if not files or len(files) > 12:
+            raise ValueError("请上传 1 至 12 个合同文件或照片")
+        if sum(len(content) for _, content, _ in files) > 30 * 1024 * 1024:
+            raise ValueError("合同文件总大小不能超过 30MB")
+        text_parts: list[str] = []
+        images: list[tuple[bytes, str]] = []
+        warnings: list[str] = []
+        ocr_tokens = 0
+        for filename, content, mime_type in files:
+            suffix = filename.lower().rsplit(".", 1)[-1]
+            if suffix in {"jpg", "jpeg", "png", "webp"} or mime_type in {"image/jpeg", "image/png", "image/webp"}:
+                if len(content) > 8 * 1024 * 1024:
+                    raise ValueError(f"单张合同照片不能超过 8MB：{filename}")
+                normalized_mime = "image/jpeg" if suffix in {"jpg", "jpeg"} else f"image/{suffix}" if suffix in {"png", "webp"} else mime_type
+                images.append((content, normalized_mime))
+            else:
+                text_parts.append(self.extract_text(filename, content))
+        if images:
+            if not self.llm:
+                raise ValueError("合同照片需要配置视觉 OCR 模型")
+            try:
+                ocr_pages = []
+                for start in range(0, len(images), 2):
+                    batch_text, batch_tokens = await self.llm.extract_images_text(images[start:start + 2])
+                    ocr_pages.append(batch_text)
+                    ocr_tokens += batch_tokens
+                ocr_text = "\n\n".join(ocr_pages)
+                text_parts.append(ocr_text)
+                if "[无法识别" in ocr_text:
+                    warnings.append("部分照片内容无法识别，请对照原件人工核验。")
+            except LLMError as exc:
+                raise ValueError("合同照片文字识别失败，请检查清晰度或稍后重试。") from exc
+        text = "\n\n".join(text_parts).strip()
+        if len(text) < 30:
+            raise ValueError("未能提取到足够的合同文本")
         findings = self.apply_rules(text)
         enhanced, tokens = await self._enhance(findings)
         severity = {"明确违反强制性规则": 4, "疑似无效或可能不成为合同内容": 3, "对承租人明显不利": 2, "信息缺失": 1}
         overall = max(findings, key=lambda item: severity[item.risk_level]).risk_level if findings else "未发现预设规则风险"
-        return ContractReviewReport(document_hash=hashlib.sha256(content).hexdigest(), filename=filename, city=city, overall_risk=overall, findings=findings, llm_enhanced=enhanced, llm_tokens=tokens)
+        digest = hashlib.sha256()
+        for filename, content, _ in files:
+            digest.update(filename.encode())
+            digest.update(content)
+        return ContractReviewReport(document_hash=digest.hexdigest(), filename="、".join(filename for filename, _, _ in files), city=city, overall_risk=overall, findings=findings, llm_enhanced=enhanced, llm_tokens=tokens + ocr_tokens, ocr_used=bool(images), extraction_warnings=warnings)

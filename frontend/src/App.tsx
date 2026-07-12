@@ -94,9 +94,9 @@ export default function App() {
     setFavoriteItems(items); setFavoriteIds(new Set(items.map(item => item.listing_id)));
   }
 
-  async function reviewContract(file: File) {
+  async function reviewContract(files: File[]) {
     setContractLoading(true); setContractError('');
-    const body = new FormData(); body.append('file', file); body.append('city', profile.city || '上海');
+    const body = new FormData(); files.forEach(file => body.append('files', file)); body.append('city', profile.city || '上海');
     try { const response = await fetch('/api/contracts/review', { method: 'POST', headers: credentials(), body }); const result = await response.json(); if (!response.ok) throw new Error(result.detail || '合同核验失败'); setContractReport(result); }
     catch (error) { setContractError(error instanceof Error ? error.message : '合同核验失败'); }
     finally { setContractLoading(false); }

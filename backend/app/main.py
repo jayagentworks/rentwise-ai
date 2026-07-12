@@ -27,7 +27,7 @@ map_provider = AMapProvider(
         qps=float(os.getenv("AMAP_QPS", "3")),
         redis_url=os.getenv("REDIS_URL"),
 ) if os.getenv("MAP_PROVIDER") == "amap" else mock_map
-llm = OpenAICompatibleLLM(os.getenv("LLM_BASE_URL", ""), os.getenv("LLM_API_KEY", ""), os.getenv("LLM_MODEL", ""), float(os.getenv("LLM_TEMPERATURE", "0")))
+llm = OpenAICompatibleLLM(os.getenv("LLM_BASE_URL", ""), os.getenv("LLM_API_KEY", ""), os.getenv("LLM_MODEL", ""), float(os.getenv("LLM_TEMPERATURE", "0")), os.getenv("LLM_VISION_MODEL", ""))
 service = RentalDecisionService(MockShanghaiListingProvider(), map_provider, llm)
 contract_skill = RentalContractReviewSkill(llm)
 
@@ -127,9 +127,10 @@ async def save_feedback(payload: FeedbackInput, user_id=Depends(anonymous_user))
 
 
 @app.post("/api/contracts/review", response_model=ContractReviewReport)
-async def review_contract(file: UploadFile = File(), city: str = Form(default="上海"), user_id=Depends(anonymous_user)):
+async def review_contract(files: list[UploadFile] = File(), city: str = Form(default="上海"), user_id=Depends(anonymous_user)):
     try:
-        report = await contract_skill.review(file.filename or "contract.txt", await file.read(), city)
+        payload = [(file.filename or f"contract-{index}", await file.read(), file.content_type or "application/octet-stream") for index, file in enumerate(files)]
+        report = await contract_skill.review_files(payload, city)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     async with SessionLocal() as db:
