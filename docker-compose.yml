@@ -1,0 +1,19 @@
+services:
+  backend:
+    build: ./backend
+    ports: ["8000:8000"]
+  frontend:
+    build: ./frontend
+    ports: ["5173:80"]
+    depends_on: [backend]
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: rentscout
+      POSTGRES_USER: rentscout
+      POSTGRES_PASSWORD: rentscout_dev
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+  redis:
+    image: redis:7-alpine
+volumes:
+  postgres_data:
