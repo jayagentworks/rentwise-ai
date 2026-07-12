@@ -1,0 +1,27 @@
+services:
+  backend:
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      CORS_ORIGINS: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 1G}
+  frontend:
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/var/cache/nginx, /var/run]
+  postgres:
+    restart: unless-stopped
+  redis:
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes: ["redis_data:/data"]
+volumes:
+  redis_data:

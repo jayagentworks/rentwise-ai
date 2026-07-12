@@ -2,7 +2,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -10,18 +10,19 @@ from sqlalchemy import delete, select
 
 from app.models import Listing, RentalPreferences, SearchResponse
 from app.llm import OpenAICompatibleLLM
-from app.persistence import AgentRun, ContractReview, Favorite, RecommendationFeedback, RentalProfile, SearchHistory, SessionLocal, authenticate_anonymous, create_anonymous_session, create_schema
+from app.persistence import AgentRun, ContractReview, Favorite, RecommendationFeedback, RentalProfile, SearchHistory, SessionLocal, authenticate_anonymous, create_anonymous_session
 from app.providers.amap import AMapError, AMapProvider
 from app.providers.mock import MockMapProvider, MockShanghaiListingProvider
 from app.service import RentalDecisionService
 from app.skills.contract import ContractReviewReport, RentalContractReviewSkill
 from app.skills.listing_image import ListingImageAnalysisSkill, ListingImageReport
+from app.storage import OptionalArtifactStorage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 load_dotenv()
 
 app = FastAPI(title="RentScout AI API", version="0.1.0")
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173").split(","), allow_credentials=True, allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type", "X-Anonymous-User-ID", "X-Anonymous-Access-Token"])
 mock_map = MockMapProvider()
 map_provider = AMapProvider(
     os.environ["AMAP_API_KEY"],
@@ -33,13 +34,23 @@ llm = OpenAICompatibleLLM(os.getenv("LLM_BASE_URL", ""), os.getenv("LLM_API_KEY"
 service = RentalDecisionService(MockShanghaiListingProvider(), map_provider, llm)
 contract_skill = RentalContractReviewSkill(llm)
 listing_image_skill = ListingImageAnalysisSkill(llm)
+artifact_storage = OptionalArtifactStorage()
 checkpoint_context = None
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Cache-Control"] = "no-store" if request.url.path.startswith("/api/") else "public, max-age=300"
+    return response
 
 
 @app.on_event("startup")
 async def startup() -> None:
     global checkpoint_context
-    await create_schema()
     checkpoint_context = AsyncPostgresSaver.from_conn_string(os.getenv("CHECKPOINT_DATABASE_URL", "postgresql://rentscout:rentscout_dev@postgres:5432/rentscout"))
     saver = await checkpoint_context.__aenter__()
     await saver.setup()
@@ -113,6 +124,19 @@ async def analyze_listing_images(files: list[UploadFile] = File(), user_id=Depen
     payload = [(await file.read(), file.content_type or "application/octet-stream") for file in files]
     try: return await listing_image_skill.analyze(payload)
     except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/artifacts", status_code=201)
+async def save_authorized_artifact(file: UploadFile = File(), consent: bool = Form(), user_id=Depends(anonymous_user)):
+    try: key = artifact_storage.upload(user_id, file.filename or "artifact", await file.read(), file.content_type or "application/octet-stream", consent)
+    except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"object_key": key, "stored_with_consent": True}
+
+
+@app.delete("/api/artifacts/{object_key:path}", status_code=204)
+async def delete_authorized_artifact(object_key: str, user_id=Depends(anonymous_user)):
+    try: artifact_storage.delete(user_id, object_key)
+    except ValueError as exc: raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.put("/api/profile", response_model=RentalPreferences)
