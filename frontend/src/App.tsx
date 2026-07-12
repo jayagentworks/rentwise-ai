@@ -3,7 +3,7 @@ import { Building2 } from 'lucide-react';
 import { defaultPreferences, SearchWizard } from './components/SearchWizard';
 import { Results } from './components/Results';
 import { Library, type FavoriteItem, type HistoryItem } from './components/Library';
-import { ContractReview, type ContractReport } from './components/ContractReview';
+import { ContractReview, type ContractReport, type ContractReviewItem } from './components/ContractReview';
 import type { Preferences, SearchResponse } from './types';
 import './styles.css';
 import './helper.css';
@@ -25,6 +25,7 @@ export default function App() {
   const [libraryView, setLibraryView] = useState<'favorites' | 'history' | null>(null);
   const [contractOpen, setContractOpen] = useState(false);
   const [contractReport, setContractReport] = useState<ContractReport | null>(null);
+  const [contractHistory, setContractHistory] = useState<ContractReviewItem[]>([]);
   const [contractLoading, setContractLoading] = useState(false);
   const [contractError, setContractError] = useState('');
   const saveTimer = useRef<number | null>(null);
@@ -44,9 +45,10 @@ export default function App() {
         if (response.status === 401) { localStorage.removeItem(ID_KEY); localStorage.removeItem(TOKEN_KEY); await createSession(); response = await fetch('/api/profile', { headers: credentials() }); }
         if (!response.ok) throw new Error('profile failed');
         setProfile((await response.json()) || defaultPreferences);
-        const [favoriteResponse, historyResponse] = await Promise.all([fetch('/api/favorites', { headers: credentials() }), fetch('/api/search-history', { headers: credentials() })]);
+        const [favoriteResponse, historyResponse, contractResponse] = await Promise.all([fetch('/api/favorites', { headers: credentials() }), fetch('/api/search-history', { headers: credentials() }), fetch('/api/contracts/reviews', { headers: credentials() })]);
         if (favoriteResponse.ok) { const items = await favoriteResponse.json(); setFavoriteItems(items); setFavoriteIds(new Set(items.map((item: FavoriteItem) => item.listing_id))); }
         if (historyResponse.ok) setHistoryItems(await historyResponse.json());
+        if (contractResponse.ok) setContractHistory(await contractResponse.json());
       } catch { setSaveState('error'); }
       finally { setMemoryReady(true); }
     }
@@ -97,11 +99,24 @@ export default function App() {
   async function reviewContract(files: File[]) {
     setContractLoading(true); setContractError('');
     const body = new FormData(); files.forEach(file => body.append('files', file)); body.append('city', profile.city || '上海');
-    try { const response = await fetch('/api/contracts/review', { method: 'POST', headers: credentials(), body }); const result = await response.json(); if (!response.ok) throw new Error(result.detail || '合同核验失败'); setContractReport(result); }
+    try { const response = await fetch('/api/contracts/review', { method: 'POST', headers: credentials(), body }); const result = await response.json(); if (!response.ok) throw new Error(result.detail || '合同核验失败'); setContractReport(result); const historyResponse = await fetch('/api/contracts/reviews', { headers: credentials() }); if (historyResponse.ok) setContractHistory(await historyResponse.json()); }
     catch (error) { setContractError(error instanceof Error ? error.message : '合同核验失败'); }
     finally { setContractLoading(false); }
   }
 
+  async function replayHistory(historyId: string) {
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/search-history/${historyId}/replay`, { method: 'POST', headers: credentials() });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || '重新计算失败');
+      setData(result); setLibraryView(null);
+      const historyResponse = await fetch('/api/search-history', { headers: credentials() });
+      if (historyResponse.ok) setHistoryItems(await historyResponse.json());
+    } catch (error) { alert(error instanceof Error ? error.message : '重新计算失败'); }
+    finally { setLoading(false); }
+  }
+
   const memoryLabel = saveState === 'saving' ? (lang === 'zh' ? '正在保存…' : 'Saving…') : saveState === 'saved' ? (lang === 'zh' ? '偏好已保存' : 'Preferences saved') : saveState === 'error' ? (lang === 'zh' ? '记忆暂不可用' : 'Memory unavailable') : '';
-  return <><a className="skip" href="#main">Skip</a><header><a className="brand" href="/"><Building2/><span>Rent<span>Wise</span></span></a><div className="mode"><span className={`memory-state ${saveState}`}>{memoryLabel}</span><button className="header-link" onClick={() => { setContractOpen(true); setLibraryView(null); }}>{lang === 'zh' ? '合同核验' : 'Contract review'}</button><button className="header-link" onClick={() => { setLibraryView('favorites'); setContractOpen(false); }}>{lang === 'zh' ? `收藏 ${favoriteItems.length}` : `Saved ${favoriteItems.length}`}</button><button className="header-link" onClick={() => { setLibraryView('history'); setContractOpen(false); }}>{lang === 'zh' ? `历史 ${historyItems.length}` : `History ${historyItems.length}`}</button><span>{data ? '02 / DECIDE' : '01 / DEFINE'}</span><button onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}>{lang === 'zh' ? 'EN' : '中文'}</button></div></header><div id="main">{!memoryReady ? <div className="memory-loading">{lang === 'zh' ? '正在恢复你的租房偏好…' : 'Restoring your preferences…'}</div> : contractOpen ? <ContractReview lang={lang} report={contractReport} loading={contractLoading} error={contractError} onBack={() => setContractOpen(false)} onReview={reviewContract}/> : libraryView ? <Library view={libraryView} favorites={favoriteItems} history={historyItems} lang={lang} onBack={() => setLibraryView(null)} onRemoveFavorite={removeFavorite}/> : data ? <Results data={data} lang={lang} onReset={() => setData(null)} favoriteIds={favoriteIds} onToggleFavorite={toggleFavorite} onFeedback={sendFeedback}/> : <SearchWizard onSubmit={search} loading={loading} lang={lang} initialPreferences={profile} onPreferencesChange={saveProfile}/>}</div><footer><span>RentWise AI</span><p>{lang === 'zh' ? '基于证据的租房决策，不替代线下核验与专业意见。' : 'Evidence-led rental decisions. Always verify offline.'}</p></footer></>;
+  return <><a className="skip" href="#main">Skip</a><header><a className="brand" href="/"><Building2/><span>Rent<span>Wise</span></span></a><div className="mode"><span className={`memory-state ${saveState}`}>{memoryLabel}</span><button className="header-link" onClick={() => { setContractOpen(true); setLibraryView(null); }}>{lang === 'zh' ? '合同核验' : 'Contract review'}</button><button className="header-link" onClick={() => { setLibraryView('favorites'); setContractOpen(false); }}>{lang === 'zh' ? `收藏 ${favoriteItems.length}` : `Saved ${favoriteItems.length}`}</button><button className="header-link" onClick={() => { setLibraryView('history'); setContractOpen(false); }}>{lang === 'zh' ? `历史 ${historyItems.length}` : `History ${historyItems.length}`}</button><span>{data ? '02 / DECIDE' : '01 / DEFINE'}</span><button onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}>{lang === 'zh' ? 'EN' : '中文'}</button></div></header><div id="main">{!memoryReady ? <div className="memory-loading">{lang === 'zh' ? '正在恢复你的租房偏好…' : 'Restoring your preferences…'}</div> : contractOpen ? <ContractReview lang={lang} report={contractReport} history={contractHistory} loading={contractLoading} error={contractError} onBack={() => setContractOpen(false)} onReview={reviewContract} onSelectHistory={setContractReport}/> : libraryView ? <Library view={libraryView} favorites={favoriteItems} history={historyItems} lang={lang} onBack={() => setLibraryView(null)} onRemoveFavorite={removeFavorite} onReplayHistory={replayHistory}/> : data ? <Results data={data} lang={lang} onReset={() => setData(null)} favoriteIds={favoriteIds} onToggleFavorite={toggleFavorite} onFeedback={sendFeedback}/> : <SearchWizard onSubmit={search} loading={loading} lang={lang} initialPreferences={profile} onPreferencesChange={saveProfile}/>}</div><footer><span>RentWise AI</span><p>{lang === 'zh' ? '基于证据的租房决策，不替代线下核验与专业意见。' : 'Evidence-led rental decisions. Always verify offline.'}</p></footer></>;
 }

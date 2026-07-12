@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
+import pypdfium2 as pdfium
 
 from app.llm import LLMError, OpenAICompatibleLLM
 
@@ -72,6 +73,19 @@ class RentalContractReviewSkill:
         return text[:120_000]
 
     @staticmethod
+    def pdf_images(content: bytes) -> list[tuple[bytes, str]]:
+        document = pdfium.PdfDocument(content)
+        if len(document) > 80:
+            raise ValueError("合同 PDF 不能超过 80 页")
+        images: list[tuple[bytes, str]] = []
+        for page in document:
+            bitmap = page.render(scale=1.6)
+            buffer = io.BytesIO()
+            bitmap.to_pil().save(buffer, format="JPEG", quality=85)
+            images.append((buffer.getvalue(), "image/jpeg"))
+        return images
+
+    @staticmethod
     def _excerpt(text: str, match: re.Match, radius: int = 70) -> str:
         return text[max(0, match.start() - radius): min(len(text), match.end() + radius)].replace("\n", " ")
 
@@ -136,6 +150,14 @@ class RentalContractReviewSkill:
                     raise ValueError(f"单张合同照片不能超过 8MB：{filename}")
                 normalized_mime = "image/jpeg" if suffix in {"jpg", "jpeg"} else f"image/{suffix}" if suffix in {"png", "webp"} else mime_type
                 images.append((content, normalized_mime))
+            elif suffix == "pdf":
+                try:
+                    text_parts.append(self.extract_text(filename, content))
+                except ValueError as exc:
+                    if "扫描 PDF" not in str(exc):
+                        raise
+                    images.extend(self.pdf_images(content))
+                    warnings.append(f"{filename} 为扫描型 PDF，已逐页进行 OCR。")
             else:
                 text_parts.append(self.extract_text(filename, content))
         if images:

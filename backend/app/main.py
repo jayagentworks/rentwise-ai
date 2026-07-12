@@ -117,6 +117,16 @@ async def search_history(user_id=Depends(anonymous_user)):
         return [{"id": str(row.id), "request": row.request_snapshot, "summary": row.result_summary, "provider": row.provider, "created_at": row.created_at} for row in rows]
 
 
+@app.post("/api/search-history/{history_id}/replay", response_model=SearchResponse)
+async def replay_search(history_id: uuid.UUID, user_id=Depends(anonymous_user)):
+    async with SessionLocal() as db:
+        row = await db.scalar(select(SearchHistory).where(SearchHistory.id == history_id, SearchHistory.anonymous_user_id == user_id))
+        if not row:
+            raise HTTPException(status_code=404, detail="历史记录不存在。")
+        preferences = RentalPreferences.model_validate(row.request_snapshot)
+    return await search(preferences, user_id)
+
+
 @app.post("/api/feedback", status_code=201)
 async def save_feedback(payload: FeedbackInput, user_id=Depends(anonymous_user)):
     async with SessionLocal() as db:
