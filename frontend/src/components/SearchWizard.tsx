@@ -9,6 +9,15 @@ const districtOptions: Record<string, string[]> = {
 };
 
 const districtsForCity = (city: string) => districtOptions[city.trim().toLowerCase()] || [];
+const geographyConsistencyError = (form: Preferences) => {
+  const cityIsUs = /^.+,\s*[A-Z]{2}$/i.test(form.city.trim());
+  const cityIsChina = /上海|北京|天津|重庆|广州|深圳|杭州|南京|成都|武汉|西安|苏州/.test(form.city);
+  const mismatch = form.destinations.find(destination =>
+    (cityIsUs && /[\u4e00-\u9fff]/.test(destination.address)) ||
+    (cityIsChina && /\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b|\b(Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd)\b/i.test(destination.address))
+  );
+  return mismatch ? `目标城市为 ${form.city}，但通勤地点“${mismatch.address}”位于其他国家或地区。请修改通勤地址后再计算` : '';
+};
 const soft = ['近地铁', '采光好', '安静', '商业便利', '适合家庭', '性价比'];
 export const defaultPreferences: Preferences = {
   city: '上海', districts: [], monthly_rent_max: 6000, monthly_total_max: 6800,
@@ -46,6 +55,7 @@ export function SearchWizard({ onSubmit, loading, lang, initialPreferences, onPr
     : ['Set your rental boundaries', 'Count every commute', 'Define what feels like home'];
   const missingNumber = [form.monthly_rent_max, form.monthly_total_max, form.bedrooms_min, form.area_min].some(Number.isNaN);
   const invalidDestinations = form.destinations.some(destination => !destination.label.trim() || !destination.address.trim() || destination.weight <= 0 || destination.max_minutes < 5);
+  const geographyError = geographyConsistencyError(form);
   const districts = districtsForCity(form.city);
 
   const numericValue = (value: number) => Number.isNaN(value) ? '' : value;
@@ -105,8 +115,9 @@ export function SearchWizard({ onSubmit, loading, lang, initialPreferences, onPr
       </div>}
 
       <div className="form-actions">
+        {geographyError && <p className="geography-error" role="alert">{geographyError}</p>}
         {step > 0 && <button className="secondary" onClick={() => setStep(step - 1)}>{cn ? '上一步' : 'Back'}</button>}
-        <button className="primary" disabled={loading || missingNumber || invalidDestinations} onClick={() => step < 2 ? setStep(step + 1) : onSubmit(form)}>
+        <button className="primary" disabled={loading || missingNumber || invalidDestinations || Boolean(geographyError)} onClick={() => step < 2 ? setStep(step + 1) : onSubmit(form)}>
           {loading ? (cn ? '正在分析…' : 'Analysing…') : step < 2 ? (cn ? '继续' : 'Continue') : (cn ? '生成租房方案' : 'Build my shortlist')} <ArrowRight />
         </button>
       </div>
