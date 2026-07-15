@@ -3,7 +3,7 @@ import pytest
 from app.models import Destination, RentalPreferences
 from app.providers.mock import MockMapProvider, MockShanghaiListingProvider
 from app.providers.google_maps import GoogleMapsError
-from app.service import RentalDecisionService, true_cost
+from app.service import RentalDecisionService, hard_constraints, true_cost
 from app.skills.commute import CommutePlanningSkill
 
 
@@ -14,6 +14,9 @@ async def test_search_ranks_and_explains_results():
     assert response.total_candidates == 6
     assert response.recommendations[0].reasons
     assert response.recommendations[0].commutes[0].minutes > 0
+    assert response.recommendations[0].score_breakdown.total == response.recommendations[0].score
+    assert response.recommendations[0].score_breakdown.cost <= 35
+    assert response.recommendations[0].score_breakdown.commute <= 35
 
 
 @pytest.mark.asyncio
@@ -89,6 +92,15 @@ def test_true_cost_amortizes_agent_fee():
     model = Listing(**listing, utilities_estimate=300, deposit_months=1, image_url="https://example.com/a.jpg", source_name="test", source_url="https://example.com")
     monthly, _ = true_cost(model, 12)
     assert monthly == 6800 + 260 + 300 + round(6800 / 12)
+
+
+def test_unknown_elevator_and_pet_policy_do_not_fail_hard_constraints():
+    from app.models import Listing
+    listing = Listing(id="unknown", title="Unknown attributes", district="TX", neighborhood="Austin", address="1 Main", monthly_rent=1800, bedrooms=1, area_sqm=50, floor=None, has_elevator=None, allows_pets=None, rental_type="entire", latitude=30.2, longitude=-97.7, image_url="https://example.com/a.jpg", source_name="test", source_url="https://example.com", tags=[])
+    prefs = RentalPreferences(city="Austin, TX", monthly_rent_max=2500, monthly_total_max=3000, move_in_date="2026-08-01", needs_elevator=True, allows_pets=True, destinations=[Destination(label="Office", address="Downtown Austin, TX", weight=1, max_minutes=60)])
+    failures = hard_constraints(listing, prefs, true_cost(listing, prefs.lease_months)[0])
+    assert "无电梯" not in failures
+    assert "不允许养宠" not in failures
 
 
 class PartiallyUnavailableMapProvider(MockMapProvider):

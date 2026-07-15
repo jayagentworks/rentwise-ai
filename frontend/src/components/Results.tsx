@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   ExternalLink,
   Heart,
@@ -33,6 +34,7 @@ export function Results({
   onAnalyzeImages: (listingId: string, files: File[]) => void;
 }) {
   const cn = lang === "zh";
+  const [activeImages, setActiveImages] = useState<Record<string, number>>({});
   return (
     <main className="results">
       <div className="results-head">
@@ -60,13 +62,16 @@ export function Results({
         ))}
       </div>
       <div className="listing-grid">
-        {data.recommendations.map((r, i) => (
+        {data.recommendations.map((r, i) => {
+          const images = r.listing.image_urls?.length ? r.listing.image_urls : [r.listing.image_url];
+          const activeImage = Math.min(activeImages[r.listing.id] || 0, images.length - 1);
+          return (
           <article
             key={r.listing.id}
             className={`listing ${!r.hard_constraints_passed ? "dimmed" : ""}`}
           >
             <div className="image-wrap">
-              <img src={r.listing.image_url} alt={cn ? `${r.listing.title}图片` : `${r.listing.title} image`} />
+              <img src={images[activeImage]} loading="lazy" alt={cn ? `${r.listing.title}第 ${activeImage + 1} 张图片` : `${r.listing.title}, image ${activeImage + 1}`} />
               <span className="rank">#{i + 1}</span>
               {r.listing.tags.includes("illustrative-image") && (
                 <span className="image-note">{cn ? "示意图" : "Illustration"}</span>
@@ -81,6 +86,16 @@ export function Results({
                     : "Has conflicts"}
               </span>
             </div>
+            {images.length > 1 && (
+              <div className="image-strip" aria-label={cn ? "房源图片" : "Listing images"}>
+                {images.map((image, imageIndex) => (
+                  <button type="button" key={image} className={imageIndex === activeImage ? "active" : ""} onClick={() => setActiveImages(current => ({ ...current, [r.listing.id]: imageIndex }))} aria-label={cn ? `查看第 ${imageIndex + 1} 张图片` : `View image ${imageIndex + 1}`} aria-pressed={imageIndex === activeImage}>
+                    <img src={image} loading="lazy" alt="" />
+                  </button>
+                ))}
+                <span>{activeImage + 1} / {images.length}</span>
+              </div>
+            )}
             <div className="listing-body">
               <div className="title-row">
                 <div>
@@ -100,6 +115,17 @@ export function Results({
                   <span>{cn ? "推荐分" : "Score"}</span>
                   <strong>{r.score}</strong>
                 </div>
+              </div>
+              <div className="score-evidence">
+                <p>{cn ? "评分组成" : "Score breakdown"}<span>{cn ? "确定性规则计算" : "Deterministic rules"}</span></p>
+                <dl>
+                  <div><dt>{cn ? "成本" : "Cost"}</dt><dd>{r.score_breakdown.cost} / 35</dd></div>
+                  <div><dt>{cn ? "通勤" : "Commute"}</dt><dd>{r.score_breakdown.commute} / 35</dd></div>
+                  <div><dt>{cn ? "硬条件" : "Constraints"}</dt><dd>{r.score_breakdown.constraints} / 20</dd></div>
+                  <div><dt>{cn ? "偏好" : "Preferences"}</dt><dd>{r.score_breakdown.preferences} / 10</dd></div>
+                  {r.score_breakdown.fairness_penalty > 0 && <div><dt>{cn ? "公平性扣分" : "Fairness penalty"}</dt><dd>-{r.score_breakdown.fairness_penalty}</dd></div>}
+                  {r.score_breakdown.feedback !== 0 && <div><dt>{cn ? "历史反馈" : "Past feedback"}</dt><dd>{r.score_breakdown.feedback > 0 ? "+" : ""}{r.score_breakdown.feedback}</dd></div>}
+                </dl>
               </div>
               <div className="metrics">
                 <div>
@@ -129,6 +155,11 @@ export function Results({
                     </b>
                   </span>
                 </div>
+              </div>
+              <div className="attribute-evidence">
+                <span>{cn ? "楼层" : "Floor"}<b>{r.listing.floor ?? (cn ? "待确认" : "Unknown")}</b></span>
+                <span>{cn ? "电梯" : "Elevator"}<b>{r.listing.has_elevator == null ? (cn ? "待确认" : "Unknown") : r.listing.has_elevator ? (cn ? "有" : "Yes") : (cn ? "无" : "No")}</b></span>
+                <span>{cn ? "养宠" : "Pets"}<b>{r.listing.allows_pets == null ? (cn ? "待确认" : "Unknown") : r.listing.allows_pets ? (cn ? "允许" : "Allowed") : (cn ? "不允许" : "Not allowed")}</b></span>
               </div>
               <div className="commute-breakdown">
                 <div className="commute-summary">
@@ -228,7 +259,7 @@ export function Results({
               </a>
             </div>
           </article>
-        ))}
+        )})}
       </div>
     </main>
   );

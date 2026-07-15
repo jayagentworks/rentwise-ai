@@ -125,6 +125,7 @@ class RentCastProvider(ListingProvider):
         image = (item.get("images") or [None])[0] if isinstance(item.get("images"), list) else None
         fallback_index = int(hashlib.sha256(str(item["id"]).encode()).hexdigest(), 16) % len(FALLBACK_HOME_IMAGES)
         image_url = image or FALLBACK_HOME_IMAGES[fallback_index]
+        image_urls = [str(value) for value in (item.get("images") or []) if value] or [image_url]
         source_url = item.get("listingAgent", {}).get("website") or item.get("listingOffice", {}).get("website") or "https://app.rentcast.io"
         return Listing(
             id=f"RC-{item['id']}", title=f"{property_type} · {address}", district=str(item.get("state") or ""),
@@ -132,7 +133,7 @@ class RentCastProvider(ListingProvider):
             property_fee_monthly=round(float((item.get("hoa") or {}).get("fee") or 0)), bedrooms=bedrooms,
             area_sqm=max(5, round(square_feet / 10.7639)), floor=1, has_elevator=property_type in {"Apartment", "Condo"},
             allows_pets=False, rental_type="entire", latitude=float(item["latitude"]), longitude=float(item["longitude"]),
-            image_url=image_url, source_name="RentCast", source_url=source_url,
+            image_url=image_url, image_urls=image_urls, source_name="RentCast", source_url=source_url,
             tags=[property_type, "real-listing-data", *([] if image else ["illustrative-image"])],
         )
 

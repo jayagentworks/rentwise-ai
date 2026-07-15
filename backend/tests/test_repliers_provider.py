@@ -13,7 +13,7 @@ SAMPLE = {
     "address": {"streetNumber": "114", "streetName": "31st", "streetSuffix": "ST", "unitNumber": "205", "city": "Austin", "state": "TX", "zip": "78705", "neighborhood": "Hyde Park"},
     "details": {"numBedrooms": 1, "sqft": "600", "style": "Condominium", "elevator": None},
     "map": {"latitude": 30.295095, "longitude": -97.735874},
-    "images": ["sample/IMG-ACT123_0.jpg"],
+    "images": ["sample/IMG-ACT123_0.jpg", "sample/IMG-ACT123_1.jpg"],
 }
 
 
@@ -26,6 +26,10 @@ async def test_repliers_maps_photo_listing(monkeypatch):
     assert listings[0].monthly_rent == 1700
     assert listings[0].area_sqm == 55
     assert str(listings[0].image_url).startswith("https://cdn.repliers.io/sample/IMG-ACT123_0.jpg")
+    assert len(listings[0].image_urls) == 2
+    assert listings[0].floor is None
+    assert listings[0].allows_pets is None
+    assert listings[0].has_elevator is None
     assert "listing-specific-photo" in listings[0].tags
 
 

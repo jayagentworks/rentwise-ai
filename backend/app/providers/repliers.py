@@ -83,14 +83,15 @@ class RepliersProvider(ListingProvider):
         sqft = float(details.get("sqft") or 250)
         bedrooms = max(1, int(details.get("numBedrooms") or 1))
         property_type = str(details.get("style") or details.get("propertyType") or "Rental")
-        image_url = f"{cls.image_base_url}/{str(images[0]).lstrip('/')}?class=medium"
-        elevator = str(details.get("elevator") or "").lower() not in {"", "none", "no", "n", "false"}
+        image_urls = [f"{cls.image_base_url}/{str(image).lstrip('/')}?class=medium" for image in images]
+        elevator_raw = details.get("elevator")
+        elevator = None if elevator_raw in {None, ""} else str(elevator_raw).lower() not in {"none", "no", "n", "false"}
         return Listing(
             id=f"RP-{item['mlsNumber']}", title=f"{property_type} · {street}", district=str(address.get("state") or ""),
             neighborhood=str(address.get("neighborhood") or address.get("city") or ""), address=formatted_address,
             monthly_rent=round(float(item["listPrice"])), bedrooms=bedrooms, area_sqm=max(5, math.floor(sqft / 10.7639)),
-            floor=1, has_elevator=elevator, allows_pets=False, rental_type="entire", latitude=float(location["latitude"]),
-            longitude=float(location["longitude"]), image_url=image_url, source_name="Repliers Preview",
+            floor=None, has_elevator=elevator, allows_pets=None, rental_type="entire", latitude=float(location["latitude"]),
+            longitude=float(location["longitude"]), image_url=image_urls[0], image_urls=image_urls, source_name="Repliers Preview",
             source_url="https://repliers.com/", tags=[property_type, "sample-listing-data", "listing-specific-photo"],
         )
 

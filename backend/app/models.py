@@ -50,13 +50,14 @@ class Listing(BaseModel):
     deposit_months: int = 1
     bedrooms: int
     area_sqm: int
-    floor: int
-    has_elevator: bool
-    allows_pets: bool
+    floor: int | None = None
+    has_elevator: bool | None = None
+    allows_pets: bool | None = None
     rental_type: Literal["entire", "shared"]
     latitude: float
     longitude: float
     image_url: HttpUrl
+    image_urls: list[HttpUrl] = Field(default_factory=list)
     source_name: str
     source_url: HttpUrl
     tags: list[str]
@@ -67,6 +68,16 @@ class CommuteResult(BaseModel):
     minutes: int
     distance_km: float
     within_limit: bool
+
+
+class ScoreBreakdown(BaseModel):
+    cost: float
+    commute: float
+    constraints: float
+    preferences: float
+    fairness_penalty: float
+    feedback: float
+    total: float
 
 
 class ListingRecommendation(BaseModel):
@@ -80,6 +91,7 @@ class ListingRecommendation(BaseModel):
     commutes: list[CommuteResult]
     hard_constraints_passed: bool
     score: float
+    score_breakdown: ScoreBreakdown
     reasons: list[str]
     tradeoffs: list[str]
 

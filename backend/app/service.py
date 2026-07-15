@@ -23,8 +23,8 @@ def hard_constraints(listing: Listing, prefs: RentalPreferences, monthly: int) -
     if listing.bedrooms < prefs.bedrooms_min: failures.append("卧室数量不足")
     if listing.area_sqm < prefs.area_min: failures.append("面积不足")
     if prefs.rental_type != "either" and listing.rental_type != prefs.rental_type: failures.append("出租方式不匹配")
-    if prefs.needs_elevator and not listing.has_elevator: failures.append("无电梯")
-    if prefs.allows_pets and not listing.allows_pets: failures.append("不允许养宠")
+    if prefs.needs_elevator and listing.has_elevator is False: failures.append("无电梯")
+    if prefs.allows_pets and listing.allows_pets is False: failures.append("不允许养宠")
     if not prefs.accepts_agent_fee and listing.agent_fee_once > 0: failures.append("包含中介费")
     if prefs.districts and listing.district not in prefs.districts: failures.append("不在目标区域")
     return failures
@@ -130,13 +130,24 @@ class RentalDecisionService:
             commute_score = max(0, 35 - weighted * .5)
             fairness_penalty = fairness_gap * .15 if len(commutes) > 1 else 0
             feedback_bonus = state.get("feedback_adjustments", {}).get(listing.id, 0)
-            score = round(max(0, cost_score + commute_score + len(preference_hits) * 5 + (20 if not failures else max(0, 8 - len(failures) * 2)) - fairness_penalty + feedback_bonus), 1)
+            preference_score = min(10, len(preference_hits) * 5)
+            constraint_score = 20 if not failures else max(0, 8 - len(failures) * 2)
+            score = round(min(100, max(0, cost_score + commute_score + preference_score + constraint_score - fairness_penalty + feedback_bonus)), 1)
+            score_breakdown = {
+                "cost": round(cost_score, 1), "commute": round(commute_score, 1), "constraints": round(constraint_score, 1),
+                "preferences": round(preference_score, 1), "fairness_penalty": round(fairness_penalty, 1),
+                "feedback": round(feedback_bonus, 1), "total": score,
+            }
             reasons = [f"真实月均成本约 ¥{monthly:,}", f"加权单程通勤约 {weighted:.0f} 分钟"]
             if len(commutes) > 1: reasons.append(f"最差单程 {worst_commute} 分钟，家庭通勤差距 {fairness_gap} 分钟")
             if preference_hits: reasons.append("符合偏好：" + "、".join(preference_hits))
             if feedback_bonus: reasons.append(f"历史反馈调整 {feedback_bonus:+.0f} 分")
-            tradeoffs = failures or (["首月现金支出较高"] if first_month > monthly * 2.2 else ["暂无明显硬性冲突，仍需线下核验"])
-            output.append(ListingRecommendation(listing=listing, monthly_true_cost=monthly, first_month_cash=first_month, weighted_commute_minutes=round(weighted, 1), worst_commute_minutes=worst_commute, weekly_total_commute_minutes=weekly_total, commute_fairness_gap_minutes=fairness_gap, commutes=commutes, hard_constraints_passed=not failures, score=score, reasons=reasons, tradeoffs=tradeoffs))
+            verification_notes = []
+            if prefs.needs_elevator and listing.has_elevator is None: verification_notes.append("电梯信息未知，需要向发布方确认")
+            if prefs.allows_pets and listing.allows_pets is None: verification_notes.append("养宠政策未知，需要向发布方确认")
+            if listing.floor is None: verification_notes.append("楼层信息未知")
+            tradeoffs = [*failures, *verification_notes] or (["首月现金支出较高"] if first_month > monthly * 2.2 else ["暂无明显硬性冲突，仍需线下核验"])
+            output.append(ListingRecommendation(listing=listing, monthly_true_cost=monthly, first_month_cash=first_month, weighted_commute_minutes=round(weighted, 1), worst_commute_minutes=worst_commute, weekly_total_commute_minutes=weekly_total, commute_fairness_gap_minutes=fairness_gap, commutes=commutes, hard_constraints_passed=not failures, score=score, score_breakdown=score_breakdown, reasons=reasons, tradeoffs=tradeoffs))
         if not output and route_errors:
             raise route_errors[0]
         output.sort(key=lambda item: (item.hard_constraints_passed, item.score), reverse=True)
